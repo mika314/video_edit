@@ -1,93 +1,72 @@
 #include "silence_detector.h"
+#include <fftw3.h>
 #include <deque>
 #include <cmath>
+#include <algorithm>
+#include <iostream>
 using namespace std;
 
 std::set<std::pair<int, int>, Cmp> silenceDetector(const std::vector<int16_t> &audio)
 {
-    enum { BuffSize = 44100 / 8 };
+    std::set<std::pair<int, int>, Cmp> result;
+    const int SpecSize = 2048;
 
-    std::set<std::pair<int, int>, Cmp> res;
-    deque<short> d;
-    int state = 0;
-    float averageVelosity = 0;
-    long long fadeIn = 0;
-    int s = 0;
-    int start = -1;
-    int end;
-    short oldV = 0;
-    short v = 0;
-    short noizeLevel = 0x8000 * 45 / 1000;
-    int cutOff = 0;
-    for (auto v1: audio)
+    fftw_complex *fftIn;
+    fftw_complex *fftOut;
+    fftw_plan plan;
+    fftIn = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
+    fftOut = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
+    plan = fftw_plan_dft_1d(SpecSize, fftIn, fftOut, FFTW_FORWARD, FFTW_MEASURE);
+    
+    enum State { Voice, Silence } state = Silence;
+    int silenceCount = 0;
+    int start = 0;
+
+    for (size_t p = 0; p < audio.size() - SpecSize; p += SpecSize)
     {
-        d.push_back(v1);
-
-        if (cutOff < 0)
+        auto f = fftIn;
+        for (auto i = begin(audio) + p; i < begin(audio) + p + SpecSize; ++i, ++f)
         {
-            if (v1 > noizeLevel)
-                noizeLevel = v1;
-            ++cutOff;
+            *f[0] = *i;
+            *f[1] = 0;
         }
-
-        averageVelosity = abs(d.back());
-        if (averageVelosity > noizeLevel * 115 / 100)
+        fftw_execute(plan);
+        double ave = 0;
+        double sq = 0;
+        int c = 0;
+        for (auto f = fftOut; f < fftOut + SpecSize / 2; ++f)
         {
-            state = -1;
-            if (fadeIn == -2)
+            double tmp = *f[0] * *f[0] + *f[1] * *f[1];
+            double m = sqrt(tmp);
+            ++c;
+            if (c < SpecSize / 4 && c > 7)
             {
-                fadeIn = 44100LL / 32;
-                oldV = v;
+                sq += tmp;
+                ave += m;
             }
-            if (start != -1)
+        }
+        if (sq / ave < 90000 || ave / (SpecSize / 4 - 7) < 0.001 * 0.1 * (32000 * SpecSize))
+        {
+            ++silenceCount;
+            if (silenceCount > 6)
             {
-                res.insert(std::make_pair(start, end));
-                start = -1;
+                if (state == Voice)
+                    start = p;
+                state = Silence;
             }
-            v = d.front();
-            if (fadeIn > 0)
-            {
-                v = (v * (44100LL / 32 - fadeIn) + oldV * fadeIn) / (44100LL / 32);
-                fadeIn--;
-            }
-            d.pop_front();
         }
         else
         {
-            if (state == -1)
-                state = BuffSize + BuffSize;
-            if (state > 0)
-            {
-                if (start != -1)
-                {
-                    res.insert(std::make_pair(start, end));
-                    start = -1;
-                }
-                v = d.front();
-                if (fadeIn > 0)
-                {
-                    v = (v * (44100LL / 32 - fadeIn) + oldV * fadeIn) / (44100LL / 32);
-                    fadeIn--;
-                }
-                d.pop_front();
-                --state;
-            }
-            else
-            {
-                if (d.size() > BuffSize)
-                {
-                    d.pop_front();
-                    if (start == -1)
-                        start = s - BuffSize;
-                    else
-                    {
-                        end = s - BuffSize;
-                        fadeIn = -2;
-                    }
-                }
-            }
+            if (state == Silence)
+                if (static_cast<int>(p) - SpecSize > start)
+                    result.insert(make_pair(start, p - SpecSize));
+            state = Voice;
+            silenceCount = 0;
         }
-        ++s;
     }
-    return res;
+
+    fftw_destroy_plan(plan);
+    fftw_free(fftIn);
+    fftw_free(fftOut);
+    return result;
 }

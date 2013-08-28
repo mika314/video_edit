@@ -24,6 +24,7 @@ extern "C"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <fftw3.h>
 
 using namespace std;
 
@@ -40,6 +41,8 @@ size_t height;
 double x = 0;
 float zoom = 1.0f;
 
+const int SpecSize = 2048;
+
 enum { Stop, Playing } state = Stop;
 
 volatile int pos = 0;
@@ -52,6 +55,66 @@ int lastXX2 = -1;
 int sampleRate;
 vector<unsigned char> rgb;
 bool follow = false;
+fftw_complex *fftIn;
+fftw_complex *fftOut;
+fftw_plan plan;
+
+void drawSpec()
+{
+    auto p = pos;
+    auto l = latency;
+    p = p - l * sampleRate / 1000000;
+    if (p < 0)
+        p = 0;
+    if (p >= static_cast<int>(audio.size()) - SpecSize)
+        p = audio.size() - SpecSize;
+    auto f = fftIn;
+    for (auto i = begin(audio) + p; i < begin(audio) + p + SpecSize; ++i, ++f)
+    {
+        *f[0] = *i;
+        *f[1] = 0;
+    }
+    fftw_execute(plan);
+    vector<double> s;
+    double ave = 0;
+    double sq = 0;
+    for (auto f = fftOut; f < fftOut + SpecSize / 2; ++f)
+    {
+        double tmp = *f[0] * *f[0] + *f[1] * *f[1];
+        double m = sqrt(tmp);
+        s.push_back(m);
+        if (s.size() < SpecSize / 4 && s.size() > 7)
+        {
+            sq += tmp;
+            ave += m;
+        }
+    }
+    const double Max = 0.1 * (32000 * SpecSize);
+    const double dmax = 1;
+
+    glLoadIdentity();
+    glOrtho(0, width, -Max * thumbHeight / (height - thumbHeight), Max, -1, 1);
+    glColor3f(0.0, 0.6, 0.0);
+    glBegin(GL_LINES);
+    for (size_t x = 0; x < width; ++x)
+    {
+        double m = s[x * SpecSize / width /  4];
+        glVertex2f(x, m);
+        glVertex2f(x, 0);
+    }
+    glEnd();
+    glLoadIdentity();
+    glOrtho(0, width, -dmax * thumbHeight / (height - thumbHeight), dmax, -1, 1);
+    if (sq / ave / 2000000.0 < 0.03 || ave / (SpecSize / 4 - 7) < 0.001 * Max)
+        glColor3f(0.5, 0.5, 0.0);
+    else
+        glColor3f(0.7, 0.0, 0.0);
+    glBegin(GL_LINES);
+    glVertex2f(0, sq / ave / 2000000.0);
+    glVertex2f(width, sq / ave / 2000000.0);
+    glEnd();
+    cout << sq / ave / 2000000.0 << endl;
+}
 
 void display()
 {
@@ -130,7 +193,7 @@ void display()
     glEnd();
     const int linesize = thumbWidth * 3;
     glLoadIdentity();
-    glOrtho (0, width, height, 0, -1, 1);
+    glOrtho(0, width, height, 0, -1, 1);
     glEnable(GL_TEXTURE_2D);
     glColor3f(1, 1, 1);
     for (size_t sx = 0; sx < width; sx += thumbWidth)
@@ -246,10 +309,13 @@ void display()
         glEnd();
     }
     glDisable(GL_TEXTURE_2D);
+    drawSpec();
+    glLoadIdentity();
+    glOrtho(0, width, 1, 0, -1, 1);
     glColor3f(1, 0, 0);
     glBegin(GL_LINES);
-    glVertex2f(sx, 0x8000);
-    glVertex2f(sx, -0x8000);
+    glVertex2f(sx, 1);
+    glVertex2f(sx, 0);
     glEnd();
     glutSwapBuffers();
 }
@@ -279,8 +345,9 @@ struct Frame
     ofstream file;
 };
 
-void readAudio(string fileName)
+void readVideoFile(string fileName)
 {
+    cout << "Reading video: " << fileName << endl;
     av_register_all();
     AVFormatContext *formatContext;
 
@@ -777,6 +844,9 @@ void bye()
     for (auto i: rmList)
         f << i.first << " " << i.second << endl;
     saveAudio();
+    fftw_destroy_plan(plan);
+    fftw_free(fftIn);
+    fftw_free(fftOut);
 }
 
 
@@ -823,7 +893,7 @@ void special(int key, int x, int y)
         auto l = latency;
         if (key == GLUT_KEY_LEFT)
         {
-            p -= sampleRate / 24;
+            p = (p - SpecSize - l * sampleRate / 1000000) / SpecSize * SpecSize +  l * sampleRate / 1000000;
             if (p < 0)
                 p = 0;
             pos = p;
@@ -831,7 +901,7 @@ void special(int key, int x, int y)
         }
         else if (key == GLUT_KEY_RIGHT)
         {
-            p += sampleRate / 24;
+            p = (p + SpecSize - l * sampleRate / 1000000) / SpecSize * SpecSize + l * sampleRate / 1000000;
             if (p >= static_cast<int>(audio.size()))
                 p = audio.size() - 1;
             pos = p;
@@ -851,7 +921,12 @@ int main(int argc, char **argv)
         return -1;
     }
     fileName = argv[1];
-    readAudio(fileName);
+
+    fftIn = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
+    fftOut = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
+    plan = fftw_plan_dft_1d(SpecSize, fftIn, fftOut, FFTW_FORWARD, FFTW_MEASURE);
+    
+    readVideoFile(fileName);
     if (!fileExists(fileName + "_rm.txt"))
         rmList = silenceDetector(audio);
     else
