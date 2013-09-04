@@ -4,6 +4,7 @@
 #include <fstream>
 #include <set>
 #include <algorithm>
+#include <tuple>
 using namespace std;
 
 int main(int argc, char **argv)
@@ -22,14 +23,15 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    set<pair<int64_t, int64_t> > frames;
+    set<tuple<int64_t, int64_t, int> > frames;
 
     while (!f.eof())
     {
         int64_t b, e;
-        f >> b >> e;
+        int s;
+        f >> b >> e >> s;
         if (!f.eof())
-            frames.insert(make_pair(b, e));
+            frames.insert(make_tuple(b, e, s));
     }
 
     char line[300];
@@ -83,7 +85,7 @@ int main(int argc, char **argv)
     int currentFrame = 0;
 
     int skipCount = 0;
-    const int SpeedUp = 6;
+    int speedUp = 6;
 
     while (!cin.eof())
     {
@@ -97,13 +99,17 @@ int main(int argc, char **argv)
 
         cin.read((char *)yuv, w * h * 3 / 2);
         ++currentFrame;
-        if (frames.size() > 0 && 1LL * currentFrame * sampleRate / fps > frames.begin()->first)
+        if (frames.size() > 0 && 1LL * currentFrame * sampleRate / fps > get<0>(*frames.begin()))
         {
-            skip += (frames.begin()->second - frames.begin()->first) * (SpeedUp - 1) / SpeedUp;
-            clog << frames.begin()->second << " " <<  frames.begin()->first << endl;
+            if (skip > 0)
+                speedUp = std::max(speedUp, get<2>(*frames.begin()));
+            else
+                speedUp = get<2>(*frames.begin());
+            skip += 1LL * (get<1>(*frames.begin()) - get<0>(*frames.begin())) * (get<2>(*frames.begin()) - 1) / get<2>(*frames.begin());
+            clog << get<1>(*frames.begin()) << " " <<  get<0>(*frames.begin()) << endl;
             frames.erase(frames.begin());
         }
-        if (skip > 0 && skipCount < SpeedUp)
+        if (skip > 0 && skipCount < speedUp)
         {
             skip -= sampleRate / fps;
             {

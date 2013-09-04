@@ -30,7 +30,7 @@ using namespace std;
 
 vector<int16_t> audio;
 
-set<pair<int, int>, Cmp > rmList;
+set<Range, Cmp > rmList;
 vector<vector<pair<int16_t, int16_t> > > minMax;
 vector<pair<void *, size_t> > thumbs;
 int thumbLinesize;
@@ -113,7 +113,6 @@ void drawSpec()
     glVertex2f(0, sq / ave / 2000000.0);
     glVertex2f(width, sq / ave / 2000000.0);
     glEnd();
-    cout << sq / ave / 2000000.0 << endl;
 }
 
 void display()
@@ -125,12 +124,15 @@ void display()
     auto l = latency;
     auto sx = (p - x - l * sampleRate / 1000000) / zoom;
     glClear(GL_COLOR_BUFFER_BIT);
-    glColor3f(0.2, 0.0, 0.0);
     glBegin(GL_QUADS);
     for (auto r: rmList)
     {
-        int x1 = (r.first - x) / zoom;
-        int x2 = (r.second - x) / zoom;
+        if (r.speedUp < 100)
+            glColor3f(0.2, 0.0, 0.0);
+        else
+            glColor3f(0.9, 0.0, 0.0);
+        int x1 = (r.start - x) / zoom;
+        int x2 = (r.end - x) / zoom;
         glVertex2f(x1, -0x8000);
         glVertex2f(x2, -0x8000);
         glVertex2f(x2, 0x8000);
@@ -658,12 +660,14 @@ void mouse(int button, int state, int x, int y)
                 if (isDel)
                 {
                     vector<int> rs;
-                    decltype(rmList.find(r)) i;
-                    while ((i = rmList.find(r)) != end(rmList))
+                    decltype(rmList.find(Range(r.first, r.second))) i;
+                    int speedUp = 6;
+                    while ((i = rmList.find(Range(r.first, r.second))) != end(rmList))
                     {
-                        rs.push_back(i->first);
-                        rs.push_back(i->second);
+                        rs.push_back(i->start);
+                        rs.push_back(i->end);
                         rmList.erase(i);
+                        speedUp = i->speedUp;
                     }
                     if (!rs.empty())
                     {
@@ -674,7 +678,7 @@ void mouse(int button, int state, int x, int y)
                         if (nmm.second > r.first && nmm.second < r.second)
                             nmm.second = r.first;
                         if (nmm.first < nmm.second)
-                            rmList.insert(nmm);
+                            rmList.insert(Range(nmm.first, nmm.second, speedUp));
                     }
                 }
                 else
@@ -682,17 +686,19 @@ void mouse(int button, int state, int x, int y)
                     vector<int> rs;
                     rs.push_back(r.first);
                     rs.push_back(r.second);
-                    decltype(rmList.find(r)) i;
-                    while ((i = rmList.find(r)) != end(rmList))
+                    decltype(rmList.find(Range(r.first, r.second))) i;
+                    while ((i = rmList.find(Range(r.first, r.second))) != end(rmList))
                     {
-                        rs.push_back(i->first);
-                        rs.push_back(i->second);
+                        rs.push_back(i->start);
+                        rs.push_back(i->end);
                         rmList.erase(i);
                     }
+                    int speedUp = ((glutGetModifiers() & GLUT_ACTIVE_CTRL) != 0) ? 600 : 6;
+                        
                     if (!rs.empty())
                     {
                         auto mm = minmax_element(begin(rs), end(rs));
-                        rmList.insert(make_pair(*mm.first, *mm.second));
+                        rmList.insert(Range(*mm.first, *mm.second, speedUp));
                     }
                 }
             }
@@ -757,9 +763,9 @@ void playerThread()
             pos += 1024 / sizeof(int16_t);
             while (pos > static_cast<int>(audio.size()))
                 pos -= audio.size();
-            auto a = rmList.find(make_pair(pos, pos));
+            auto a = rmList.find(Range(pos, pos));
             if (a != end(rmList))
-                pos = a->second;
+                pos = a->end;
         }
         else
             usleep(100);
@@ -777,17 +783,14 @@ void saveAudio()
     auto removeRange = rmList.begin();
     vector<int16_t> result;
     vector<int> sum;
-    const int SpeedUp = 6;
+    int speedUp = 6;
     while (currentSample < audio.size())
     {
         vector<int16_t> buff;
         auto v = audio[currentSample];
         size_t frameSize;
-        if (skipCount >= SpeedUp)
-            frameSize = std::max<size_t>(1024, sum.size());
-        else
-            frameSize = 1024;;
-        while (buff.size() < frameSize || v >= 0 ||  audio[currentSample] <= 0)
+        frameSize = 1024;;
+        while (buff.size() < frameSize || ((v >= 0 || audio[currentSample] <= 0) && (abs(v) >= 10 || abs(audio[currentSample]) >= 10)))
         {
             v = audio[currentSample];
             buff.push_back(v);
@@ -795,12 +798,18 @@ void saveAudio()
             if (currentSample >= audio.size())
                 break;
         }
-        if (removeRange != end(rmList) && static_cast<int>(currentSample) > removeRange->first)
+        if (removeRange != end(rmList) && static_cast<int>(currentSample) > removeRange->start)
         {
-            skip += (removeRange->second - removeRange->first) * (SpeedUp - 1) / SpeedUp;
+            speedUp = removeRange->speedUp;
+            skip += 1LL * (removeRange->end - removeRange->start) * (speedUp - 1) / speedUp;
+            cout << currentSample << "\t" << 1.0 * currentSample / sampleRate << "\tskip + " 
+                 << 1.0 * 1LL * (removeRange->end - removeRange->start) * (speedUp - 1) / speedUp / sampleRate<< " =\t" 
+                 << 1.0 * skip / sampleRate << "\t" 
+                 << speedUp << endl;
             ++removeRange;
         }
-        if (skip > 0 && skipCount < SpeedUp)
+        cout << currentSample << " " << skip << " " << currentSample + skip << endl;
+        if (skip > 0 && skipCount < speedUp)
         {
             skip -= buff.size();
             if (sum.size() < buff.size())
@@ -813,18 +822,26 @@ void saveAudio()
         }
         else
         {
+            cout << "." << endl;
             if (sum.size() < buff.size())
                 sum.resize(buff.size());
             ++skipCount;
-            for (size_t i = 0; i < sum.size(); ++i)
+            if (skipCount < 10)
             {
-                auto r = (sum[i] + buff[i]) * 2 / (skipCount + 1);
-                if (r > 0x7800)
-                    r = 0x7800;
-                if (r < -0x7800)
-                    r = -0x7800;
-                result.push_back(r);
+                for (size_t i = 0; i < sum.size(); ++i)
+                {
+                    int r = (sum[i] + (i < buff.size() ? buff[i] : 0)) * 2 / (skipCount + 1);
+                    if (r > 0x7800)
+                        r = 0x7800;
+                    if (r < -0x7800)
+                        r = -0x7800;
+                    result.push_back(r);
+                }
+                skip += sum.size() - buff.size();
             }
+            else
+                for (size_t i = 0; i < buff.size(); ++i)
+                    result.push_back(buff[i]);
             skipCount = 0;
             sum.resize(0);
         }
@@ -842,7 +859,7 @@ void bye()
     t->join();
     ofstream f(fileName + "_rm.txt");
     for (auto i: rmList)
-        f << i.first << " " << i.second << endl;
+        f << i.start << " " << i.end << " " << i.speedUp << endl;
     saveAudio();
     fftw_destroy_plan(plan);
     fftw_free(fftIn);
@@ -935,10 +952,10 @@ int main(int argc, char **argv)
 
         while (!f.eof())
         {
-            int b, e;
-            f >> b >> e;
+            int b, e, s;
+            f >> b >> e >> s;
             if (!f.eof())
-                rmList.insert(make_pair(b, e));
+                rmList.insert(Range(b, e, s));
         }
     }
     width = 1280;

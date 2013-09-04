@@ -6,9 +6,9 @@
 #include <iostream>
 using namespace std;
 
-std::set<std::pair<int, int>, Cmp> silenceDetector(const std::vector<int16_t> &audio)
+std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
 {
-    std::set<std::pair<int, int>, Cmp> result;
+    std::set<Range, Cmp> result;
     const int SpecSize = 2048;
 
     fftw_complex *fftIn;
@@ -59,7 +59,10 @@ std::set<std::pair<int, int>, Cmp> silenceDetector(const std::vector<int16_t> &a
         {
             if (state == Silence)
                 if (static_cast<int>(p) - SpecSize > start)
-                    result.insert(make_pair(start, p - SpecSize));
+                {
+                    cout << start << " " << p - SpecSize << endl;
+                    result.insert(Range(start, p - SpecSize));
+                }
             state = Voice;
             silenceCount = 0;
         }
