@@ -58,6 +58,7 @@ bool follow = false;
 fftw_complex *fftIn;
 fftw_complex *fftOut;
 fftw_plan plan;
+const int Fps = 24;
 
 void drawSpec()
 {
@@ -200,16 +201,16 @@ void display()
     glColor3f(1, 1, 1);
     for (size_t sx = 0; sx < width; sx += thumbWidth)
     {
-        int x1 = (sx * zoom + x) * 24 / sampleRate;
-        int x2 = ((sx + thumbWidth) * zoom + x) * 24 / sampleRate; 
+        int x1 = (sx * zoom + x) * Fps / sampleRate;
+        int x2 = ((sx + thumbWidth) * zoom + x) * Fps / sampleRate; 
         if (x1 < 0)
             x1 = 0;
-        if (x1 >= static_cast<int>(audio.size() * 24 / sampleRate))
-            x1 = audio.size() * 24 / sampleRate - 1;
+        if (x1 >= static_cast<int>(audio.size() * Fps / sampleRate))
+            x1 = audio.size() * Fps / sampleRate - 1;
         if (x2 < 0)
             x2 = 0;
-        if (x2 >= static_cast<int>(audio.size() * 24 / sampleRate))
-            x2 = audio.size() * 24 / sampleRate - 1;
+        if (x2 >= static_cast<int>(audio.size() * Fps / sampleRate))
+            x2 = audio.size() * Fps / sampleRate - 1;
         vector<int> mm(thumbLinesize * thumbHeight);
         int maxL = 0;
         vector<pair<int *, int> > ptrs;
@@ -280,7 +281,7 @@ void display()
     if (thumbs.size() > 0)
     {
         rgb.resize(linesize * thumbHeight);
-        int64_t offset = 1LL * thumbLinesize * thumbHeight * ((p - l * sampleRate / 1000000) * 24 / sampleRate);
+        int64_t offset = 1LL * thumbLinesize * thumbHeight * ((p - l * sampleRate / 1000000) * Fps / sampleRate);
         if (offset < 0)
             offset = 0;
         if (offset * sizeof(int) > thumbs[0].second - thumbLinesize * thumbHeight * sizeof(int))
@@ -477,10 +478,18 @@ void readVideoFile(string fileName)
     avpicture_fill((AVPicture *)rgbFrame, buffer, (PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
     thumbLinesize = rgbFrame->linesize[0];
     bool isThumbCached = fileExists(fileName + ".thum0");
+    bool firstAudioFrame = true;
     while (av_read_frame(formatContext, &packet) == 0)
     {
         if (packet.stream_index == audioStreamIndex)
         {
+            if (firstAudioFrame)
+            {
+                firstAudioFrame = false;
+                const auto c = packet.pts * audioDecodec->time_base.num * audioDecodec->sample_rate / audioDecodec->time_base.den;
+                for (int i = 0; i < c; ++i)
+                    audio.push_back(0);
+            }
             int gotFrame = 0;
             AVFrame *decodedFrame = avcodec_alloc_frame();
             int len = avcodec_decode_audio4(audioDecodec, decodedFrame, &gotFrame, &packet);
@@ -509,8 +518,8 @@ void readVideoFile(string fileName)
         }
         else if (packet.stream_index == videoStreamIndex && !isThumbCached)
         {
-            if (packet.pts % (24 * 10) == 0)
-                clog << setfill('0') << setw(2) << packet.pts / 24 / 60 << ":"  << setw(2) << packet.pts / 24 % 60 << "."  << setw(2) << packet.pts % 24 << endl;
+            if (packet.pts % (Fps * 10) == 0)
+                clog << setfill('0') << setw(2) << packet.pts / Fps / 60 << ":"  << setw(2) << packet.pts / Fps % 60 << "."  << setw(2) << packet.pts % Fps << endl;
             AVFrame *decodedFrame = avcodec_alloc_frame();
             int result;
             avcodec_decode_video2(videoDecodec, decodedFrame, &result, &packet);
@@ -908,9 +917,10 @@ void special(int key, int x, int y)
     {
         auto p = pos;
         auto l = latency;
+        const auto Offset = sampleRate / Fps;
         if (key == GLUT_KEY_LEFT)
         {
-            p = (p - SpecSize - l * sampleRate / 1000000) / SpecSize * SpecSize +  l * sampleRate / 1000000;
+            p = (p - Offset - l * sampleRate / 1000000) / Offset * Offset +  l * sampleRate / 1000000;
             if (p < 0)
                 p = 0;
             pos = p;
@@ -918,7 +928,7 @@ void special(int key, int x, int y)
         }
         else if (key == GLUT_KEY_RIGHT)
         {
-            p = (p + SpecSize - l * sampleRate / 1000000) / SpecSize * SpecSize + l * sampleRate / 1000000;
+            p = (p + Offset - l * sampleRate / 1000000) / Offset * Offset + l * sampleRate / 1000000;
             if (p >= static_cast<int>(audio.size()))
                 p = audio.size() - 1;
             pos = p;
