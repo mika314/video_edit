@@ -64,7 +64,6 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
         }
         else
         {
-            cout << "voice" << endl;
             if (state == Silence)
                 if (static_cast<int>(p) - SpecSize > start)
                 {

@@ -955,9 +955,13 @@ int main(int argc, char **argv)
     
     readVideoFile(fileName);
     if (!fileExists(fileName + "_rm.txt"))
+    {
+        cout << "rm file does not exist. Run Silence detection." << endl;
         rmList = silenceDetector(audio);
+    }
     else
     {
+        cout << "Reading from rm list." << endl;
         ifstream f(fileName + "_rm.txt");
 
         while (!f.eof())
