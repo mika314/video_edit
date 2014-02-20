@@ -37,13 +37,13 @@ void display()
     glVertex2f(Border, Border);
   
     glTexCoord2f(1, 0);
-    glVertex2f(width + Border, Border);
+    glVertex2f(width / 3 + Border, Border);
 
     glTexCoord2f(1, 1);
-    glVertex2f(width + Border, height + Border);
+    glVertex2f(width / 3 + Border, height / 3 + Border);
 
     glTexCoord2f(0, 1);
-    glVertex2f(Border, height + Border);
+    glVertex2f(Border, height / 3 + Border);
     glEnd();
     glutSwapBuffers();
 }
@@ -231,21 +231,21 @@ int main(int argc, char **argv)
         inputWidth = 1920;
         inputHeight = 1080;
     }
-    glutInitWindowSize(inputWidth + Border * 2, inputHeight + Border * 2);
-    glutInitWindowPosition(1920, 0);
+    glutInitWindowSize(inputWidth / 3 + Border * 2, inputHeight / 3 + Border * 2);
+    glutInitWindowPosition(1280 + 65, 0);
     glutCreateWindow("Screen Capture");
     glClearColor(0, 0.5, 0, 1.0);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho (0, inputWidth + Border * 2, inputHeight + Border * 2, 0, -1, 1);
+    glOrtho (0, inputWidth / 3 + Border * 2, inputHeight / 3 + Border * 2, 0, -1, 1);
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
 
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
     glEnable(GL_TEXTURE_2D);
     timer();
