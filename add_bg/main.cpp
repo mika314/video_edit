@@ -20,9 +20,14 @@ int main(int argc, const char **argv)
         if (!bg)
             bg = new ifstream(argv[2]);
         bg->read((char *)&v2, sizeof(v2));
-        v1 += v2 * k;
-        if (k < 0.15)
-            k += 0.15 / 5 / 48000;
+        int v = v1 + v2 * k;
+        if (k < 0.25)
+            k += 0.25 / 5 / 48000;
+        if (v > 0x7fff)
+            v = 0x7fff;
+        if (v < -0x7fff)
+            v = -0x7fff;
+        v1 = v;
         cout.write((char *)&v1, sizeof(v1));
         if (bg->eof())
         {
