@@ -2,7 +2,7 @@
 
 rootdir=`dirname $0`
 
-convert ~/dl/lmte.png -fill blue -font DejaVu-Sans-Mono-Book -pointsize 50 -draw "text 80,640 '$2'" `basename $1 .mp4`.png
+convert ~/dl/lmte.png -fill blue -font DejaVu-Sans-Mono-Book -pointsize 60 -draw "text 80,640 '$2'" `basename $1 .mp4`.png
 $rootdir/silence_detector/silence_detector $1
 avconv -i $1 -f yuv4mpegpipe - | $rootdir/frame_remover/frame_remover $1_rm.txt 48000 | $rootdir/prepend_frame/prepend_frame `basename $1 .mp4`.png 9188 | yuvview | avconv -f yuv4mpegpipe -i - -b 10000k -threads 8 `basename $1 .mp4`_noaudio.mp4
 mv $1.s16l $1.raw
