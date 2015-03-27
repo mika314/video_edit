@@ -10,21 +10,24 @@ extern "C"
 #include <libavdevice/avdevice.h>
 #include <libswscale/swscale.h>
 }
-#include <pulse/simple.h>
-#include <pulse/error.h>
-#include <vector>
-#include <iostream>
 #include <algorithm>
 #include <cassert>
-#include <thread>
 #include <fstream>
-#include <sstream>
 #include <iomanip>
-#include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <iostream>
+#include <sstream>
+#include <thread>
+#include <vector>
+
 #include <fcntl.h>
 #include <fftw3.h>
+#include <pulse/error.h>
+#include <pulse/simple.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 using namespace std;
 
@@ -52,7 +55,7 @@ string fileName;
 
 int lastXX = -1;
 int lastXX2 = -1;
-int sampleRate;
+unsigned sampleRate;
 vector<unsigned char> rgb;
 bool follow = false;
 fftw_complex *fftIn;
@@ -500,18 +503,13 @@ void readVideoFile(string fileName)
                     int dataSize = av_samples_get_buffer_size(nullptr, channels,
                                                               decodedFrame->nb_samples,
                                                               audioDecodec->sample_fmt, 1);
-                    if (channels == 1)
-                        audio.insert(end(audio), (int16_t *)decodedFrame->data[0], (int16_t *)decodedFrame->data[0] + dataSize / sizeof(int16_t));
-                    else
-                    {
-                        for (size_t i = 0; i < dataSize / sizeof(int16_t) / channels; ++i)
-                        {
-                            int sum = 0;
-                            for (int c = 0; c < channels; ++c)
-                                sum += ((int16_t *)decodedFrame->data[0])[i * channels + c];
-                            audio.push_back(sum / channels);
-                        }
-                    }
+                   for (size_t i = 0; i < dataSize / sizeof(float) / channels; ++i)
+                   {
+                       int sum = 0;
+                       for (int c = 0; c < channels; ++c)
+                           sum += ((float *)decodedFrame->data[0])[i * channels + c] * 0x8000;
+                       audio.push_back(sum / channels);
+                   }
                 }
             }
             av_free(decodedFrame);
@@ -742,7 +740,7 @@ void playerThread()
         {
             PA_SAMPLE_S16LE, /**< The sample format */
             sampleRate, /**< The sample rate. (e.g. 44100) */
-            1 /**< Audio channels. (1 for mono, 2 for stereo, ...) */
+            1u /**< Audio channels. (1 for mono, 2 for stereo, ...) */
         };
     int error;
     pa_simple *paSimple = pa_simple_new(NULL, "video_edit", PA_STREAM_PLAYBACK, NULL, "playback", &ss, NULL, NULL, &error);

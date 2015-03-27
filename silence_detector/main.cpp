@@ -168,6 +168,46 @@ void readVideoFile(string fileName)
         }
     }
     const auto channels = audioDecodec->channels;
+    std::cout << "channels: " << channels << std::endl;
+    switch (audioDecodec->sample_fmt)
+    {
+    case AV_SAMPLE_FMT_NONE:
+      std::cout << "sample_fmt: AV_SAMPLE_FMT_NONE" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_U8:
+      std::cout << "sample_fmt: U8" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_S16:
+      std::cout << "sample_fmt: S16" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_S32:
+      std::cout << "sample_fmt: S32" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_FLT:
+      std::cout << "sample_fmt: FLT" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_DBL:
+      std::cout << "sample_fmt: DBL" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_U8P:
+      std::cout << "sample_fmt: U8P" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_S16P:
+      std::cout << "sample_fmt: S16P" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_S32P:
+      std::cout << "sample_fmt: S32P" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_FLTP:
+      std::cout << "sample_fmt: FLTP" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_DBLP:
+      std::cout << "sample_fmt: DBLP" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_NB:
+      std::cout << "sample_fmt: NB" << std::endl;
+      break;
+    }                    
     AVPacket packet;
     bool firstAudioFrame = true;
     while (av_read_frame(formatContext, &packet) == 0)
@@ -191,15 +231,15 @@ void readVideoFile(string fileName)
                     int dataSize = av_samples_get_buffer_size(nullptr, channels,
                                                               decodedFrame->nb_samples,
                                                               audioDecodec->sample_fmt, 1);
-                    if (channels == 1)
+                    if (channels == 1 && false)
                         audio.insert(end(audio), (int16_t *)decodedFrame->data[0], (int16_t *)decodedFrame->data[0] + dataSize / sizeof(int16_t));
                     else
                     {
-                        for (size_t i = 0; i < dataSize / sizeof(int16_t) / channels; ++i)
+                        for (size_t i = 0; i < dataSize / sizeof(float) / channels; ++i)
                         {
                             int sum = 0;
                             for (int c = 0; c < channels; ++c)
-                                sum += ((int16_t *)decodedFrame->data[0])[i * channels + c];
+                                sum += ((float *)decodedFrame->data[0])[i * channels + c] * 0x8000;
                             audio.push_back(sum / channels);
                         }
                     }
