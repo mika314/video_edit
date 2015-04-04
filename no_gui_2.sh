@@ -12,9 +12,9 @@ echo Mix video and audio
 avconv -i `basename $1 .mp4`_noaudio.mp4 -f s16le -ac 1 -ar 48000 -i $1_compressed.raw -map 0:0 -map 1:0 -vcodec copy -ab 64k -strict experimental `basename $1 .mp4`_mix.mp4
 echo Move atom
 qt-faststart `basename $1 .mp4`_mix.mp4 `basename $1 .mp4`.mov
-# echo Clean up
-# rm `basename $1 .mp4`_mix.mp4
-# rm $1.raw
-# rm $1_compressed.raw
-# rm $1_rm.txt
-# rm `basename $1 .mp4`_noaudio.mp4
+echo Clean up
+rm `basename $1 .mp4`_mix.mp4
+rm $1.raw
+rm $1_compressed.raw
+rm $1_rm.txt
+rm `basename $1 .mp4`_noaudio.mp4
