@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <cstring>
 using namespace std;
 
 std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
@@ -16,6 +17,8 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
     fftw_plan plan;
     fftIn = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
     fftOut = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
+    memset(fftIn, 0, sizeof(fftw_complex) * SpecSize);
+    memset(fftOut, 0, sizeof(fftw_complex) * SpecSize);
     plan = fftw_plan_dft_1d(SpecSize, fftIn, fftOut, FFTW_FORWARD, FFTW_MEASURE);
     
     enum State { Voice, Silence } state = Silence;
@@ -64,7 +67,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
         }
         else
         {
-            cout << "voice" << endl;
+            cout << "voice " << ave / (SpecSize / 4 - 7) << " " << 0.08 * 0.1 * (32000 * SpecSize) << endl;
             if (state == Silence)
                 if (static_cast<int>(p) - SpecSize > start)
                 {
