@@ -62,6 +62,78 @@ void reshape(int w, int h)
   glOrtho(0, w, h, 0, -1.0, 1.0);
 }
 
+void rgb2yuv(std::vector<short>::iterator sum,
+          std::vector<unsigned char>::iterator rgb,
+          std::vector<unsigned char>::iterator Y,
+          std::vector<unsigned char>::iterator U,
+          std::vector<unsigned char>::iterator V, int n, int c)
+{
+  for (auto y = 0; y < n; ++y)
+  {
+    for (auto x = 0; x < width / 2; ++x)
+    {
+      auto &b0 = *(rgb++);
+      b0 = *sum / c;
+      *sum = 0;
+      ++sum;
+      auto &g0 = *(rgb++);
+      g0 = *sum / c;
+      *sum = 0;
+      ++sum;
+      auto &r0 = *(rgb++);
+      r0 = *sum / c;
+      *sum = 0;
+      ++sum;
+      *Y++ = ((66 * r0 + 129 * g0 + 25 * b0 + 128) >> 8) + 16;
+      auto &b1 = *(rgb++);
+      b1 = *sum / c;
+      *sum = 0;
+      ++sum;
+      auto &g1 = *(rgb++);
+      g1 = *sum / c;
+      *sum = 0;
+      ++sum;
+      auto &r1 = *(rgb++);
+      r1 = *sum / c;
+      *sum = 0;
+      ++sum;
+      *Y++ = ((66 * r1 + 129 * g1 + 25 * b1 + 128) >> 8) + 16;
+      auto b = (b0 + b1) / 2;
+      auto g = (g0 + g1) / 2;
+      auto r = (r0 + r1) / 2;
+      *U++ = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+      *V++ = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
+    }
+    for (auto x = 0; x < width; ++x)
+    {
+      *rgb = *sum / c;
+      *sum = 0;
+      ++sum;
+      auto b0 = *(rgb++);
+      *rgb = *sum / c;
+      *sum = 0;
+      ++sum;
+      auto g0 = *(rgb++);
+      *rgb = *sum / c;
+      *sum = 0;
+      ++sum;
+      auto r0 = *(rgb++);
+      *Y++ = ((66 * r0 + 129 * g0 + 25 * b0 + 128) >> 8) + 16;
+    }
+  }
+}
+
+void ave(std::vector<short>::iterator sum, unsigned char *rgb, int n)
+{
+  for (int i = 0; i < n; ++i)
+  {
+    *sum++ += *rgb++;
+    *sum++ += *rgb++;
+    *sum++ += *rgb++;
+    ++rgb;
+  }
+}
+
 void grabber()
 {
   avcodec_register_all();
@@ -101,7 +173,7 @@ void grabber()
   }
   av_dump_format(formatContext, 0, fileName, 0);
 
-  vector<int> sum;
+  vector<short> sum;
   vector<unsigned char> yuv;
   width = formatContext->streams[0]->codec->width;
   height = formatContext->streams[0]->codec->height;
@@ -139,54 +211,24 @@ void grabber()
         ++currentTs;
       }
     }
-    auto y = packet.data;
-    for (auto x = begin(sum); x != end(sum);)
-    {
-      *x++ += *y++;
-      *x++ += *y++;
-      *x++ += *y++;
-      ++y;
-    }
+    std::thread t1(&ave, begin(sum), packet.data, width * height / 4);
+    std::thread t2(&ave, begin(sum) + 3 * width * height / 4, packet.data + 4 * width * height / 4, width * height / 4);
+    std::thread t3(&ave, begin(sum) + 2 * 3 * width * height / 4, packet.data + 2 * 4 * width * height / 4, width * height / 4);
+    ave(begin(sum) + 3 * 3 * width * height / 4, packet.data + 3 * 4 * width * height / 4, width * height / 4);
+    t1.join();
+    t2.join();
+    t3.join();
     ++c;
     if (packet.pts > currentTs)
     {
-      transform(begin(sum), end(sum), begin(bgr), [c](int x){ return x / c; });
-      fill(begin(sum), end(sum), 0);
+      std::thread t1(&rgb2yuv, begin(sum), begin(bgr), begin(yuv), begin(yuv) + width * height, begin(yuv) + 5 * width * height / 4, height / 2 / 4, c);
+      std::thread t2(&rgb2yuv, begin(sum) + 3 * width * height / 4, begin(bgr) + 3 * width * height / 4, begin(yuv) + width * height / 4, begin(yuv) + width * height + width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + width * height / 4 / 4, height / 2 / 4, c);
+      std::thread t3(&rgb2yuv, begin(sum) + 2 * 3 * width * height / 4, begin(bgr) + 2 * 3 * width * height / 4, begin(yuv) + 2 * width * height / 4, begin(yuv) + width * height + 2 * width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + 2 * width * height / 4 / 4, height / 2 / 4, c);
+      rgb2yuv(begin(sum) + 3 * 3 * width * height / 4, begin(bgr) + 3 * 3 * width * height / 4, begin(yuv) + 3 * width * height / 4, begin(yuv) + width * height + 3 * width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + 3 * width * height / 4 / 4, height / 2 / 4, c);
+      t1.join();
+      t2.join();
+      t3.join();
       c = 0;
-      
-
-
-
-      auto tmpRgb = begin(bgr);
-      auto tmpY = begin(yuv);
-      auto tmpU = begin(yuv) + width * height;
-      auto tmpV = begin(yuv) + 5 * width * height / 4;
-      for (auto y = 0; y < height / 2; ++y)
-      {
-        for (auto x = 0; x < width / 2; ++x)
-        {
-          auto b0 = *(tmpRgb++);
-          auto g0 = *(tmpRgb++);
-          auto r0 = *(tmpRgb++);
-          *tmpY++ = ((66 * r0 + 129 * g0 + 25 * b0 + 128) >> 8) + 16;
-          auto b1 = *(tmpRgb++);
-          auto g1 = *(tmpRgb++);
-          auto r1 = *(tmpRgb++);
-          *tmpY++ = ((66 * r1 + 129 * g1 + 25 * b1 + 128) >> 8) + 16;
-          auto b = (b0 + b1) / 2;
-          auto g = (g0 + g1) / 2;
-          auto r = (r0 + r1) / 2;
-          *tmpU++ = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
-          *tmpV++ = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-        }
-        for (auto x = 0; x < width; ++x)
-        {
-          auto b0 = *(tmpRgb++);
-          auto g0 = *(tmpRgb++);
-          auto r0 = *(tmpRgb++);
-          *tmpY++ = ((66 * r0 + 129 * g0 + 25 * b0 + 128) >> 8) + 16;
-        }
-      }
 
       while (packet.pts > currentTs)
       {
