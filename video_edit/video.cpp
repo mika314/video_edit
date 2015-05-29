@@ -1,15 +1,50 @@
 #include "video.hpp"
+#ifndef INT64_C
+#define INT64_C(c) (c ## LL)
+#define UINT64_C(c) (c ## ULL)
+#endif
+extern "C"
+{
+#include <libavformat/avformat.h>
+#include <libavdevice/avdevice.h>
+#include <libswscale/swscale.h>
+}
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+#include <memory>
+#include <iomanip>
+#include <limits>
+#include <cassert>
+using namespace std;
 
 static bool fileExists(const string &name) 
 {
   return ifstream(name).good();
 }
 
+namespace
+{
+struct Frame
+{
+  Frame(std::string fileName):
+    file(fileName)
+  {
+    if (!file.is_open())
+      throw runtime_error(string("file ") + fileName + " is not open ");
+  }
+  vector<int> data;
+  int count;
+  ofstream file;
+};
+}
 
+static const int Fps = 24;
 
 void Video::read()
 {
-  cout << "Reading video: " << fileName << endl;
+  cout << "Reading video: " << fileName_ << endl;
   av_register_all();
   AVFormatContext *formatContext;
 
@@ -18,13 +53,13 @@ void Video::read()
 
   if (len != 0) 
   {
-    cerr << "Could not open input " << fileName << endl;;
+    cerr << "Could not open input " << fileName_ << endl;;
     throw -0x10;
   }
     
   if (avformat_find_stream_info(formatContext, NULL) < 0) 
   {
-    cerr << "Could not read stream information from " <<  fileName << endl;
+    cerr << "Could not read stream information from " <<  fileName_ << endl;
     throw -0x11;
   }
   av_dump_format(formatContext, 0, fileName_.c_str(), 0);
@@ -130,15 +165,15 @@ void Video::read()
   AVFrame *rgbFrame = avcodec_alloc_frame();
   if (!rgbFrame)
     throw runtime_error("Could not allocate memory for RGB frame");
-  rgbFrame->width = thumbWidth;
-  rgbFrame->height = thumbHeight;
+  rgbFrame->width = thumbWidth();
+  rgbFrame->height = thumbHeight();
   rgbFrame->format = PIX_FMT_RGB24;
   auto numBytes = avpicture_get_size((PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
   vector<shared_ptr<Frame> > levels;
   uint8_t *buffer = (uint8_t *)av_malloc(numBytes);
   avpicture_fill((AVPicture *)rgbFrame, buffer, (PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
-  thumbLinesize = rgbFrame->linesize[0];
-  bool isThumbCached = fileExists(fileName + ".thum0");
+  thumbLinesize_ = rgbFrame->linesize[0];
+  bool isThumbCached = fileExists(fileName_ + ".thum0");
   bool firstAudioFrame = true;
   while (av_read_frame(formatContext, &packet) == 0)
   {
@@ -186,7 +221,7 @@ void Video::read()
         int level = 0;
         while (level >= static_cast<int>(levels.size()))
         {
-          shared_ptr<Frame> f = make_shared<Frame>(fileName + ".thum" + to_string(levels.size()));
+          shared_ptr<Frame> f = make_shared<Frame>(fileName_ + ".thum" + to_string(levels.size()));
           levels.push_back(f);
           f->data.resize(rgbFrame->linesize[0] * rgbFrame->height);
           for (auto &i: f->data)
@@ -206,7 +241,7 @@ void Video::read()
           ++level;
           while (level >= static_cast<int>(levels.size()))
           {
-            shared_ptr<Frame> f = make_shared<Frame>(fileName + ".thum" + to_string(levels.size()));
+            shared_ptr<Frame> f = make_shared<Frame>(fileName_ + ".thum" + to_string(levels.size()));
             levels.push_back(f);
             f->data.resize(rgbFrame->linesize[0] * rgbFrame->height);
             for (auto &i: f->data)
@@ -236,18 +271,18 @@ void Video::read()
   av_free(audioDecodec);
   avformat_free_context(formatContext);
 
-  if (!fileExists(fileName + ".pcs"))
+  if (!fileExists(fileName_ + ".pcs"))
   {
     minMaxCalc();
   }
   else
   {
-    ifstream f(fileName + ".pcs");
-    int n = audio.size() / 2;
+    ifstream f(fileName_ + ".pcs");
+    int n = audio_.size() / 2;
     while (n > 0)
     {
-      minMax.push_back(vector<pair<int16_t, int16_t> >(n + 1));
-      f.read((char *)&minMax.back()[0], minMax.back().size() * sizeof(minMax.back()[0]));
+      minMax_.push_back(vector<pair<int16_t, int16_t> >(n + 1));
+      f.read((char *)&minMax_.back()[0], minMax_.back().size() * sizeof(minMax_.back()[0]));
       n /= 2;
     }
   }
@@ -281,7 +316,17 @@ void Video::minMaxCalc()
       per += audio_.size() / 100;
     }
   }
-  ofstream f(fileName + ".pcs");
+  ofstream f(fileName_ + ".pcs");
   for (const auto &i: minMax_)
     f.write((const char *)&i[0], i.size() * sizeof(i[0]));
+}
+
+int Video::thumbHeight() const
+{
+  return thumbHeight_;
+}
+
+int Video::thumbWidth() const
+{
+  return thumbWidth_;
 }

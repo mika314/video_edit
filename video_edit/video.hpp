@@ -22,8 +22,8 @@ private:
   std::string fileName_;
   mutable std::vector<unsigned char> image_;
   std::vector<int16_t> audio_;
-  vector<vector<pair<int16_t, int16_t> > > minMax_;
-  vector<pair<void *, size_t> > thumbs_;
+  std::vector<std::vector<std::pair<int16_t, int16_t> > > minMax_;
+  std::vector<std::pair<void *, size_t> > thumbs_;
   int thumbLinesize_;
   int thumbHeight_;
   int thumbWidth_;
