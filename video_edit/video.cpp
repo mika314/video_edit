@@ -147,6 +147,46 @@ void Video::read()
   }
   sampleRate_ = audioDecodec->sample_rate;
   const auto channels = audioDecodec->channels;
+  std::cout << "channels: " << channels << std::endl;
+  switch (audioDecodec->sample_fmt)
+  {
+  case AV_SAMPLE_FMT_NONE:
+    std::cout << "sample_fmt: AV_SAMPLE_FMT_NONE" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_U8:
+    std::cout << "sample_fmt: U8" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_S16:
+    std::cout << "sample_fmt: S16" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_S32:
+    std::cout << "sample_fmt: S32" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_FLT:
+    std::cout << "sample_fmt: FLT" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_DBL:
+    std::cout << "sample_fmt: DBL" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_U8P:
+    std::cout << "sample_fmt: U8P" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_S16P:
+    std::cout << "sample_fmt: S16P" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_S32P:
+    std::cout << "sample_fmt: S32P" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_FLTP:
+    std::cout << "sample_fmt: FLTP" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_DBLP:
+    std::cout << "sample_fmt: DBLP" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_NB:
+    std::cout << "sample_fmt: NB" << std::endl;
+    break;
+  }
   AVPacket packet;
   width_ = videoDecodec->width;
   height_ = videoDecodec->height;

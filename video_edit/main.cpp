@@ -60,7 +60,7 @@ bool follow = false;
 fftw_complex *fftIn;
 fftw_complex *fftOut;
 fftw_plan plan;
-const int Fps = 24;
+const double Fps = 29.97002997;
 
 vector<int16_t> audio;
 
@@ -318,7 +318,7 @@ void display()
   if (thumbs.size() > 0)
   {
     rgb.resize(linesize * thumbHeight);
-    int64_t offset = 1LL * thumbLinesize * thumbHeight * ((p - l * sampleRate / 1000000) * Fps / sampleRate);
+    int64_t offset = 1LL * thumbLinesize * thumbHeight * static_cast<int64_t>((p - l * sampleRate / 1000000) * Fps / sampleRate);
     if (offset < 0)
       offset = 0;
     if (offset * sizeof(int) > thumbs[0].second - thumbLinesize * thumbHeight * sizeof(int))
@@ -490,6 +490,46 @@ void readVideoFile(string fileName)
   }
   sampleRate = audioDecodec->sample_rate;
   const auto channels = audioDecodec->channels;
+  std::cout << "channels: " << channels << std::endl;
+  switch (audioDecodec->sample_fmt)
+  {
+  case AV_SAMPLE_FMT_NONE:
+    std::cout << "sample_fmt: AV_SAMPLE_FMT_NONE" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_U8:
+    std::cout << "sample_fmt: U8" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_S16:
+    std::cout << "sample_fmt: S16" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_S32:
+    std::cout << "sample_fmt: S32" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_FLT:
+    std::cout << "sample_fmt: FLT" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_DBL:
+    std::cout << "sample_fmt: DBL" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_U8P:
+    std::cout << "sample_fmt: U8P" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_S16P:
+    std::cout << "sample_fmt: S16P" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_S32P:
+    std::cout << "sample_fmt: S32P" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_FLTP:
+    std::cout << "sample_fmt: FLTP" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_DBLP:
+    std::cout << "sample_fmt: DBLP" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_NB:
+    std::cout << "sample_fmt: NB" << std::endl;
+    break;
+  }
   AVPacket packet;
   thumbHeight = 128;
   thumbWidth = videoDecodec->width * thumbHeight / videoDecodec->height;
@@ -537,12 +577,25 @@ void readVideoFile(string fileName)
           int dataSize = av_samples_get_buffer_size(nullptr, channels,
                                                     decodedFrame->nb_samples,
                                                     audioDecodec->sample_fmt, 1);
-          for (size_t i = 0; i < dataSize / sizeof(float) / channels; ++i)
+          if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_FLT)
           {
-            int sum = 0;
-            for (int c = 0; c < channels; ++c)
-              sum += ((float *)decodedFrame->data[0])[i * channels + c] * 0x8000;
-            audio.push_back(sum / channels);
+            for (size_t i = 0; i < dataSize / sizeof(float) / channels; ++i)
+            {
+              int sum = 0;
+              for (int c = 0; c < channels; ++c)
+                sum += ((float *)decodedFrame->data[0])[i * channels + c] * 0x8000;
+              audio.push_back(sum / channels);
+            }
+          }
+          else if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_FLTP)
+          {
+            for (size_t i = 0; i < dataSize / sizeof(float) / channels; ++i)
+            {
+              int sum = 0;
+              for (int c = 0; c < channels; ++c)
+                sum += ((float *)decodedFrame->data[0])[i + c * dataSize / sizeof(float) / channels] * 0x8000;
+              audio.push_back(sum / channels);
+            }
           }
         }
       }
@@ -550,8 +603,8 @@ void readVideoFile(string fileName)
     }
     else if (packet.stream_index == videoStreamIndex && !isThumbCached)
     {
-      if (packet.pts % (Fps * 10) == 0)
-        clog << setfill('0') << setw(2) << packet.pts / Fps / 60 << ":"  << setw(2) << packet.pts / Fps % 60 << "."  << setw(2) << packet.pts % Fps << endl;
+      if (packet.pts % (24 * 10) == 0)
+        clog << "." << endl;
       AVFrame *decodedFrame = avcodec_alloc_frame();
       int result;
       avcodec_decode_video2(videoDecodec, decodedFrame, &result, &packet);
