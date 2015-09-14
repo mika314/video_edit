@@ -231,15 +231,23 @@ void readVideoFile(string fileName)
                     int dataSize = av_samples_get_buffer_size(nullptr, channels,
                                                               decodedFrame->nb_samples,
                                                               audioDecodec->sample_fmt, 1);
-                    if (channels == 1 && false)
-                        audio.insert(end(audio), (int16_t *)decodedFrame->data[0], (int16_t *)decodedFrame->data[0] + dataSize / sizeof(int16_t));
-                    else
+                    if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_FLT)
                     {
                         for (size_t i = 0; i < dataSize / sizeof(float) / channels; ++i)
                         {
                             int sum = 0;
                             for (int c = 0; c < channels; ++c)
                                 sum += ((float *)decodedFrame->data[0])[i * channels + c] * 0x8000;
+                            audio.push_back(sum / channels);
+                        }
+                    }
+                    else if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_FLTP)
+                    {
+                        for (size_t i = 0; i < dataSize / sizeof(float) / channels; ++i)
+                        {
+                            int sum = 0;
+                            for (int c = 0; c < channels; ++c)
+                                sum += ((float *)decodedFrame->data[0])[i + c * dataSize / sizeof(float) / channels] * 0x8000;
                             audio.push_back(sum / channels);
                         }
                     }
