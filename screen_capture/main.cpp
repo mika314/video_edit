@@ -24,7 +24,7 @@ int height = 0;
 vector<unsigned char> bgr;
 bool done = false;
 
-int OutputFrameRate = 24;
+int OutputFrameRate = 30;
 
 const int Border = 5;
 
