@@ -22,6 +22,7 @@ extern "C"
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <fftw3.h>
+#include <unordered_map>
 
 using namespace std;
 
@@ -355,6 +356,25 @@ int main(int argc, char **argv)
     fileName = argv[1];
 
     readVideoFile(fileName);
+
+    std::unordered_map<int16_t, int> hist;
+    for (auto y: audio)
+      hist[y]++;
+    auto sum = 0u;
+    auto max = 0x7fff;
+    while (sum < audio.size() / 10000)
+      sum += hist[max--];
+    std::cout << "Average: " << 1.0f * max / 0x7fff << std::endl;
+      for (auto &y: audio)
+      {
+        int64_t tmp = y * 0x7000 / max;
+        if (tmp > 0x7fff)
+          tmp = 0x7fff;
+        if (tmp < -0x7fff)
+          tmp = -0x7fff;
+        y = tmp;
+      }
+
     rmList = silenceDetector(audio);
     bye();
 }

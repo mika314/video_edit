@@ -70,7 +70,6 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
             if (state == Silence)
                 if (static_cast<int>(p) - SpecSize > start)
                 {
-                    cout << start << " " << p - SpecSize << endl;
                     result.insert(Range(start, p - SpecSize));
                 }
             state = Voice;
