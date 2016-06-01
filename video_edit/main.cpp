@@ -34,7 +34,8 @@ using namespace std;
 
 set<Range, Cmp > rmList;
 vector<vector<pair<int16_t, int16_t> > > minMax;
-vector<pair<void *, size_t> > thumbs;
+unsigned char *thumbs = nullptr;
+size_t thumsSize = 0;
 int thumbLinesize;
 int thumbHeight;
 int thumbWidth;
@@ -236,67 +237,19 @@ void display()
   glOrtho(0, width, height, 0, -1, 1);
   glEnable(GL_TEXTURE_2D);
   glColor3f(1, 1, 1);
-  for (size_t sx = 0; sx < width; sx += thumbWidth)
+  if (thumbs != nullptr && thumsSize != 0)
   {
-    int x1 = (sx * zoom + x) * Fps / sampleRate;
-    int x2 = ((sx + thumbWidth) * zoom + x) * Fps / sampleRate; 
-    if (x1 < 0)
-      x1 = 0;
-    if (x1 >= static_cast<int>(audio.size() * Fps / sampleRate))
-      x1 = audio.size() * Fps / sampleRate - 1;
-    if (x2 < 0)
-      x2 = 0;
-    if (x2 >= static_cast<int>(audio.size() * Fps / sampleRate))
-      x2 = audio.size() * Fps / sampleRate - 1;
-    vector<int> mm(thumbLinesize * thumbHeight);
-    int maxL = 0;
-    vector<pair<int *, int> > ptrs;
-    while (x1 < x2)
+    for (size_t sx = 0; sx < width; sx += thumbWidth)
     {
-      int l = 0;
-      while ((x1 & (1 << l)) == 0 && x1 + (1 << l) < x2)
-        ++l;
-      {
-        while (static_cast<int>(thumbs.size()) <= l)
-        {
-          int f = open((fileName + ".thum" + to_string(thumbs.size())).c_str(), O_RDONLY);
-          if (f < 0)
-            throw runtime_error("cannot open the file: " + fileName + ".thum" + to_string(thumbs.size()));
-          auto fileSize = lseek(f, 0, SEEK_END);
-          if (fileSize == (off_t) -1)
-            throw runtime_error("cannot determine the file size: " + fileName + ".thum" + to_string(thumbs.size()));
-          auto p = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, f, 0);
-          close(f);
-          thumbs.push_back(make_pair(p, fileSize));
-        }
-        auto tmp = 1LL * (x1 >> l) * thumbLinesize * thumbHeight;
-        if (tmp * sizeof(int) < thumbs[l].second)
-        {
-          ptrs.push_back(make_pair((int *)thumbs[l].first + tmp, l));
-          if (maxL < l)
-            maxL = l;
-        }
-        x1 += (1 << l);
-      }
-    }
-    int count = 0;
-    for (auto ptr: ptrs)
-      if (ptr.second >= maxL - 4)
-      {
-        for (size_t i = 0; i < mm.size(); ++i)
-          mm[i] += *(ptr.first++);
-        count += (1 << ptr.second);
-      }
-    if (count > 0)
-    {
+      int x1 = (sx * zoom + x) * Fps / sampleRate;
+      if (x1 < 0)
+        x1 = 0;
+      if (x1 >= static_cast<int>(audio.size() * Fps / sampleRate))
+        x1 = audio.size() * Fps / sampleRate - 1;
       rgb.resize(linesize * thumbHeight);
-      for (int y = 0; y < thumbHeight; ++y)
-        for (int x = 0; x < thumbWidth; ++x)
-        {
-          rgb[y * linesize + x * 3] = mm[y * thumbLinesize + x * 3] / count;
-          rgb[y * linesize + x * 3 + 1] = mm[y * thumbLinesize + x * 3 + 1] / count;
-          rgb[y * linesize + x * 3 + 2] = mm[y * thumbLinesize + x * 3 + 2] / count;
-        }
+      auto offset = static_cast<size_t>(x1) * linesize * thumbHeight;
+      if (offset + linesize * thumbHeight < thumsSize)
+        memcpy(rgb.data(), thumbs + offset, linesize * thumbHeight);
       glTexImage2D(GL_TEXTURE_2D, 0, 3, thumbWidth, thumbHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &rgb[0]);
       glBegin(GL_QUADS);
 
@@ -314,23 +267,9 @@ void display()
 
       glEnd();
     }
-  }
-  if (thumbs.size() > 0)
-  {
-    rgb.resize(linesize * thumbHeight);
-    int64_t offset = 1LL * thumbLinesize * thumbHeight * static_cast<int64_t>((p - l * sampleRate / 1000000) * Fps / sampleRate);
-    if (offset < 0)
-      offset = 0;
-    if (offset * sizeof(int) > thumbs[0].second - thumbLinesize * thumbHeight * sizeof(int))
-      offset = 0;
-    int *tmp = (int *)thumbs[0].first + offset;
-    for (int y = 0; y < thumbHeight; ++y)
-      for (int x = 0; x < thumbWidth; ++x)
-      {
-        rgb[y * linesize + x * 3] = tmp[y * thumbLinesize + x * 3];
-        rgb[y * linesize + x * 3 + 1] = tmp[y * thumbLinesize + x * 3 + 1];
-        rgb[y * linesize + x * 3 + 2] = tmp[y * thumbLinesize + x * 3 + 2];
-      }
+    auto offset = static_cast<size_t>((p - l * sampleRate / 1000000) * Fps / sampleRate) * linesize * thumbHeight;
+    if (offset + linesize * thumbHeight < thumsSize)
+      memcpy(rgb.data(), thumbs + offset, linesize * thumbHeight);
     glTexImage2D(GL_TEXTURE_2D, 0, 3, thumbWidth, thumbHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &rgb[0]);
     glBegin(GL_QUADS);
 
@@ -385,15 +324,13 @@ struct Frame
   ofstream file;
 };
 
-void readVideoFile(string fileName)
+int readAudio(string fileName)
 {
+  int framesNum = 0;
   cout << "Reading video: " << fileName << endl;
   av_register_all();
-  AVFormatContext *formatContext;
-
-  formatContext = NULL;
+  AVFormatContext *formatContext = NULL;
   int len = avformat_open_input(&formatContext, fileName.c_str(), nullptr, nullptr);
-
   if (len != 0) 
   {
     cerr << "Could not open input " << fileName << endl;;
@@ -460,34 +397,6 @@ void readVideoFile(string fileName)
       throw -0x33;
     }
   }
-  codec = formatContext->streams[videoStreamIndex]->codec;
-  AVCodecContext *videoDecodec;
-  {
-    if(codec->codec_id == 0)
-    {
-      cerr << "-0x30" << endl;
-      throw -0x30;
-    }
-    AVCodec* c = avcodec_find_decoder(codec->codec_id);
-    if (c == NULL)
-    {
-      cerr << "Could not find decoder ID " << codec->codec_id << endl;
-      throw -0x31;
-    }
-    videoDecodec = avcodec_alloc_context3(c);
-    if (videoDecodec == NULL)
-    {
-      cerr << "Could not alloc context for decoder " << c->name << endl;
-      throw -0x32;
-    }
-    avcodec_copy_context(videoDecodec, codec);
-    int ret = avcodec_open2(videoDecodec, c, NULL);
-    if (ret < 0)
-    {
-      cerr << "Could not open stream decoder " << c->name;
-      throw -0x33;
-    }
-  }
   sampleRate = audioDecodec->sample_rate;
   const auto channels = audioDecodec->channels;
   std::cout << "channels: " << channels << std::endl;
@@ -531,30 +440,6 @@ void readVideoFile(string fileName)
     break;
   }
   AVPacket packet;
-  thumbHeight = 128;
-  thumbWidth = videoDecodec->width * thumbHeight / videoDecodec->height;
-  struct SwsContext *swsContext = sws_getContext(videoDecodec->width, videoDecodec->height, videoDecodec->pix_fmt, 
-                                                 thumbWidth, thumbHeight, PIX_FMT_RGB24,
-                                                 SWS_BICUBIC, NULL, NULL, NULL);
-  if (swsContext == NULL) 
-  {
-    ostringstream err;
-    err << "Could not create swscale context for " << videoDecodec->width << "x" << videoDecodec->height;
-    throw runtime_error(err.str());
-  }
-
-  AVFrame *rgbFrame = avcodec_alloc_frame();
-  if (!rgbFrame)
-    throw runtime_error("Could not allocate memory for RGB frame");
-  rgbFrame->width = thumbWidth;
-  rgbFrame->height = thumbHeight;
-  rgbFrame->format = PIX_FMT_RGB24;
-  auto numBytes = avpicture_get_size((PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
-  vector<shared_ptr<Frame> > levels;
-  uint8_t *buffer = (uint8_t *)av_malloc(numBytes);
-  avpicture_fill((AVPicture *)rgbFrame, buffer, (PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
-  thumbLinesize = rgbFrame->linesize[0];
-  bool isThumbCached = fileExists(fileName + ".thum0");
   bool firstAudioFrame = true;
   while (av_read_frame(formatContext, &packet) == 0)
   {
@@ -601,66 +486,12 @@ void readVideoFile(string fileName)
       }
       av_free(decodedFrame);
     }
-    else if (packet.stream_index == videoStreamIndex && !isThumbCached)
+    else if (packet.stream_index == videoStreamIndex)
     {
-      if (packet.pts % (24 * 10) == 0)
-        clog << "." << endl;
-      AVFrame *decodedFrame = avcodec_alloc_frame();
-      int result;
-      avcodec_decode_video2(videoDecodec, decodedFrame, &result, &packet);
-      if (result)
-      {
-        sws_scale(swsContext, decodedFrame->data, decodedFrame->linesize, 0, decodedFrame->height, 
-                  rgbFrame->data, rgbFrame->linesize);
-        int level = 0;
-        while (level >= static_cast<int>(levels.size()))
-        {
-          shared_ptr<Frame> f = make_shared<Frame>(fileName + ".thum" + to_string(levels.size()));
-          levels.push_back(f);
-          f->data.resize(rgbFrame->linesize[0] * rgbFrame->height);
-          for (auto &i: f->data)
-            i = 0;
-          f->count = 0;
-        }
-        auto f = levels[level];
-        vector<int> d;
-        for (auto i = rgbFrame->data[0]; i < rgbFrame->data[0] + rgbFrame->linesize[0] * rgbFrame->height; ++i)
-          d.push_back(*i);
-        f->file.write((const char *)&d[0], d.size() * sizeof(d[0]));
-        for (size_t i = 0; i < f->data.size(); ++i)
-          f->data[i] += rgbFrame->data[0][i];
-        ++f->count;
-        while (f->count > 1)
-        {
-          ++level;
-          while (level >= static_cast<int>(levels.size()))
-          {
-            shared_ptr<Frame> f = make_shared<Frame>(fileName + ".thum" + to_string(levels.size()));
-            levels.push_back(f);
-            f->data.resize(rgbFrame->linesize[0] * rgbFrame->height);
-            for (auto &i: f->data)
-              i = 0;
-            f->count = 0;
-          }
-          auto f2 = levels[level];
-          f2->file.write((const char *)&f->data[0], f->data.size() * sizeof(f->data[0]));
-          for (size_t i = 0; i < f2->data.size(); ++i)
-          {
-            f2->data[i] += f->data[i];
-            f->data[i] = 0;
-          }
-          ++f2->count;
-          f->count = 0;
-          f = f2;
-        }
-      }
-      av_free(decodedFrame);
+      ++framesNum;
     }
     av_free_packet(&packet);
   }
-  av_free(buffer);
-  av_free(rgbFrame);
-  sws_freeContext(swsContext);
   avcodec_close(audioDecodec);
   av_free(audioDecodec);
   avformat_free_context(formatContext);
@@ -680,7 +511,142 @@ void readVideoFile(string fileName)
       n /= 2;
     }
   }
+  return framesNum;
 }
+
+void readVideo(const std::string &fileName, int framesNum)
+{
+  AVFormatContext *formatContext;
+
+  formatContext = NULL;
+  int len = avformat_open_input(&formatContext, fileName.c_str(), nullptr, nullptr);
+
+  if (len != 0) 
+  {
+    cerr << "Could not open input " << fileName << endl;;
+    throw -0x10;
+  }
+    
+  if (avformat_find_stream_info(formatContext, NULL) < 0) 
+  {
+    cerr << "Could not read stream information from " <<  fileName << endl;
+    throw -0x11;
+  }
+  av_dump_format(formatContext, 0, fileName.c_str(), 0);
+
+  int videoStreamIndex = -1;
+
+  for (unsigned i = 0; i < formatContext->nb_streams; ++i)
+    if (formatContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+    {
+      if (videoStreamIndex == -1)
+        videoStreamIndex = i;
+    }
+  if (videoStreamIndex == -1)
+  {
+    cerr << "File does not have video stream" << endl;
+    throw -0x34;
+  }
+
+  auto codec = formatContext->streams[videoStreamIndex]->codec;
+  AVCodecContext *videoDecodec;
+  {
+    if(codec->codec_id == 0)
+    {
+      cerr << "-0x30" << endl;
+      throw -0x30;
+    }
+    AVCodec* c = avcodec_find_decoder(codec->codec_id);
+    if (c == NULL)
+    {
+      cerr << "Could not find decoder ID " << codec->codec_id << endl;
+      throw -0x31;
+    }
+    videoDecodec = avcodec_alloc_context3(c);
+    if (videoDecodec == NULL)
+    {
+      cerr << "Could not alloc context for decoder " << c->name << endl;
+      throw -0x32;
+    }
+    avcodec_copy_context(videoDecodec, codec);
+    int ret = avcodec_open2(videoDecodec, c, NULL);
+    if (ret < 0)
+    {
+      cerr << "Could not open stream decoder " << c->name;
+      throw -0x33;
+    }
+  }
+  AVPacket packet;
+  thumbHeight = 128;
+  thumbWidth = videoDecodec->width * thumbHeight / videoDecodec->height;
+  struct SwsContext *swsContext = sws_getContext(videoDecodec->width, videoDecodec->height, videoDecodec->pix_fmt, 
+                                                 thumbWidth, thumbHeight, PIX_FMT_RGB24,
+                                                 SWS_BICUBIC, NULL, NULL, NULL);
+  if (swsContext == NULL) 
+  {
+    ostringstream err;
+    err << "Could not create swscale context for " << videoDecodec->width << "x" << videoDecodec->height;
+    throw runtime_error(err.str());
+  }
+
+  AVFrame *rgbFrame = avcodec_alloc_frame();
+  if (!rgbFrame)
+    throw runtime_error("Could not allocate memory for RGB frame");
+  rgbFrame->width = thumbWidth;
+  rgbFrame->height = thumbHeight;
+  rgbFrame->format = PIX_FMT_RGB24;
+  auto numBytes = avpicture_get_size((PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
+  vector<shared_ptr<Frame> > levels;
+  uint8_t *buffer = (uint8_t *)av_malloc(numBytes);
+  avpicture_fill((AVPicture *)rgbFrame, buffer, (PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
+  thumbLinesize = rgbFrame->linesize[0];
+  bool isThumbCached = fileExists(fileName + ".thum");
+  if (!isThumbCached)
+  {
+    std::ofstream f(fileName + ".thum");
+    f.seekp(static_cast<size_t>(framesNum) * numBytes);
+    char ch = 0;
+    f.write(&ch, 1);
+  }
+  {
+    int f = open((fileName + ".thum").c_str(), O_RDWR);
+    if (f < 0)
+      throw runtime_error("cannot open the file: " + fileName + ".thum");
+    thumbs = (unsigned char *)mmap(nullptr, static_cast<size_t>(framesNum) * numBytes, PROT_READ | PROT_WRITE, MAP_SHARED, f, 0);
+    if (thumbs == MAP_FAILED)
+    {
+      throw runtime_error(std::string() + "mmap " + strerror(errno) + std::to_string(errno));
+    }
+  }
+  thumsSize = static_cast<size_t>(framesNum) * numBytes;
+  int frameNum = 0;
+  while (av_read_frame(formatContext, &packet) == 0)
+  {
+    if (packet.stream_index == videoStreamIndex && !isThumbCached)
+    {
+      if (packet.pts % (24 * 10) == 0)
+        clog << "." << endl;
+      AVFrame *decodedFrame = avcodec_alloc_frame();
+      int result;
+      avcodec_decode_video2(videoDecodec, decodedFrame, &result, &packet);
+      if (result)
+      {
+        sws_scale(swsContext, decodedFrame->data, decodedFrame->linesize, 0, decodedFrame->height, 
+                  rgbFrame->data, rgbFrame->linesize);
+        memcpy(thumbs + static_cast<size_t>(frameNum++) * numBytes, rgbFrame->data[0], numBytes);
+      }
+      av_free(decodedFrame);
+    }
+    av_free_packet(&packet);
+  }
+  av_free(buffer);
+  av_free(rgbFrame);
+  sws_freeContext(swsContext);
+  avformat_free_context(formatContext);
+
+}
+
+
 
 int lastX = -1;
 int lastMouseX = -1;
@@ -955,6 +921,7 @@ void saveAudio()
 }
 
 thread *t;
+thread *readVideoThread;
 
 void bye()
 {
@@ -968,6 +935,7 @@ void bye()
   fftw_destroy_plan(plan);
   fftw_free(fftIn);
   fftw_free(fftOut);
+  delete t;
 }
 
 
@@ -1079,7 +1047,8 @@ int main(int argc, char **argv)
   fftOut = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
   plan = fftw_plan_dft_1d(SpecSize, fftIn, fftOut, FFTW_FORWARD, FFTW_MEASURE);
     
-  readVideoFile(fileName);
+  auto framesNum = readAudio(fileName);
+  readVideoThread = new thread(readVideo, fileName, framesNum);
   if (!fileExists(fileName + "_rm.txt"))
   {
     cout << "rm file does not exist. Run Silence detection." << endl;
