@@ -9,12 +9,13 @@ extern "C"
 #include <libavformat/avformat.h>
 #include <libavdevice/avdevice.h>
 }
-#include <sys/time.h>
 #include <iostream>
 #include <string>
-#include <vector>
+#include <sys/time.h>
 #include <thread>
-#include <algorithm>
+#include <time.h>
+#include <unistd.h>
+#include <vector>
 
 using namespace std;
 int inputWidth;
@@ -243,6 +244,7 @@ void grabber()
         }
       }
     }
+    av_free_packet(&packet);
   }
   av_dict_free(&format_opts);
   avformat_free_context(formatContext);
