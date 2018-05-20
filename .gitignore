@@ -7,3 +7,5 @@ tmp
 /add_bg/add_bg
 /prepend_frame/prepend_frame
 /silence_detector/silence_detector
+.coddle
+libcoddle.cfg.so
