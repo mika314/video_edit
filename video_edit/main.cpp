@@ -453,7 +453,7 @@ int readAudio(string fileName)
           audio.push_back(0);
       }
       int gotFrame = 0;
-      AVFrame *decodedFrame = avcodec_alloc_frame();
+      AVFrame *decodedFrame = av_frame_alloc();
       int len = avcodec_decode_audio4(audioDecodec, decodedFrame, &gotFrame, &packet);
       if (len >= 0)
       {
@@ -580,7 +580,7 @@ void readVideo(const std::string &fileName, int framesNum)
   thumbHeight = 128;
   thumbWidth = videoDecodec->width * thumbHeight / videoDecodec->height;
   struct SwsContext *swsContext = sws_getContext(videoDecodec->width, videoDecodec->height, videoDecodec->pix_fmt, 
-                                                 thumbWidth, thumbHeight, PIX_FMT_RGB24,
+                                                 thumbWidth, thumbHeight, AV_PIX_FMT_RGB24,
                                                  SWS_BICUBIC, NULL, NULL, NULL);
   if (swsContext == NULL) 
   {
@@ -589,16 +589,16 @@ void readVideo(const std::string &fileName, int framesNum)
     throw runtime_error(err.str());
   }
 
-  AVFrame *rgbFrame = avcodec_alloc_frame();
+  AVFrame *rgbFrame = av_frame_alloc();
   if (!rgbFrame)
     throw runtime_error("Could not allocate memory for RGB frame");
   rgbFrame->width = thumbWidth;
   rgbFrame->height = thumbHeight;
-  rgbFrame->format = PIX_FMT_RGB24;
-  auto numBytes = avpicture_get_size((PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
+  rgbFrame->format = AV_PIX_FMT_RGB24;
+  auto numBytes = avpicture_get_size((AVPixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
   vector<shared_ptr<Frame> > levels;
   uint8_t *buffer = (uint8_t *)av_malloc(numBytes);
-  avpicture_fill((AVPicture *)rgbFrame, buffer, (PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
+  avpicture_fill((AVPicture *)rgbFrame, buffer, (AVPixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
   thumbLinesize = rgbFrame->linesize[0];
   bool isThumbCached = fileExists(fileName + ".thum");
   if (!isThumbCached)
@@ -626,7 +626,7 @@ void readVideo(const std::string &fileName, int framesNum)
     {
       if (packet.pts % (24 * 10) == 0)
         clog << "." << endl;
-      AVFrame *decodedFrame = avcodec_alloc_frame();
+      AVFrame *decodedFrame = av_frame_alloc();
       int result;
       avcodec_decode_video2(videoDecodec, decodedFrame, &result, &packet);
       if (result)

@@ -193,7 +193,7 @@ void Video::read()
   thumbHeight_ = 128;
   thumbWidth_ = videoDecodec->width * thumbHeight_ / videoDecodec->height;
   struct SwsContext *swsContext = sws_getContext(videoDecodec->width, videoDecodec->height, videoDecodec->pix_fmt, 
-                                                 thumbWidth_, thumbHeight_, PIX_FMT_RGB24,
+                                                 thumbWidth_, thumbHeight_, AV_PIX_FMT_RGB24,
                                                  SWS_BICUBIC, NULL, NULL, NULL);
   if (swsContext == NULL) 
   {
@@ -202,16 +202,16 @@ void Video::read()
     throw runtime_error(err.str());
   }
 
-  AVFrame *rgbFrame = avcodec_alloc_frame();
+  AVFrame *rgbFrame = av_frame_alloc();
   if (!rgbFrame)
     throw runtime_error("Could not allocate memory for RGB frame");
   rgbFrame->width = thumbWidth();
   rgbFrame->height = thumbHeight();
-  rgbFrame->format = PIX_FMT_RGB24;
-  auto numBytes = avpicture_get_size((PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
+  rgbFrame->format = AV_PIX_FMT_RGB24;
+  auto numBytes = avpicture_get_size((AVPixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
   vector<shared_ptr<Frame> > levels;
   uint8_t *buffer = (uint8_t *)av_malloc(numBytes);
-  avpicture_fill((AVPicture *)rgbFrame, buffer, (PixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
+  avpicture_fill((AVPicture *)rgbFrame, buffer, (AVPixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
   thumbLinesize_ = rgbFrame->linesize[0];
   bool isThumbCached = fileExists(fileName_ + ".thum0");
   bool firstAudioFrame = true;
@@ -227,7 +227,7 @@ void Video::read()
           audio_.push_back(0);
       }
       int gotFrame = 0;
-      AVFrame *decodedFrame = avcodec_alloc_frame();
+      AVFrame *decodedFrame = av_frame_alloc();
       int len = avcodec_decode_audio4(audioDecodec, decodedFrame, &gotFrame, &packet);
       if (len >= 0)
       {
@@ -251,7 +251,7 @@ void Video::read()
     {
       if (packet.pts % (Fps * 10) == 0)
         clog << setfill('0') << setw(2) << packet.pts / Fps / 60 << ":"  << setw(2) << packet.pts / Fps % 60 << "."  << setw(2) << packet.pts % Fps << endl;
-      AVFrame *decodedFrame = avcodec_alloc_frame();
+      AVFrame *decodedFrame = av_frame_alloc();
       int result;
       avcodec_decode_video2(videoDecodec, decodedFrame, &result, &packet);
       if (result)
