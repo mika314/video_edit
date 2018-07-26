@@ -11,7 +11,7 @@ int main(int argc, char **argv)
 {
     if (argc != 3)
     {
-        cerr << "Usage: avconv -i video.mp4 -f yuv4mpegpipe - | ./frame_remover rm_list.txt sample_rate" << endl;
+        cerr << "Usage: ffmpeg -i video.mp4 -f yuv4mpegpipe - | ./frame_remover rm_list.txt sample_rate" << endl;
         return -1;
     }
     std::string fileName = argv[1];
@@ -94,7 +94,7 @@ int main(int argc, char **argv)
         {
             cin.getline(line, sizeof(line));
             if (strlen(line) == 0)
-                return false;
+                return 1;
         } while (strcmp(line, "FRAME") != 0);
 
         cin.read((char *)yuv, w * h * 3 / 2);

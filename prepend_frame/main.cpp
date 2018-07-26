@@ -172,7 +172,7 @@ int main(int argc, const char *argv[])
     av_register_all();
     if (argc != 3)
     {
-        cerr << "Usage: avconv -i vidoe.mp4 -f yuv4mpegpipe - | ./prepend_frame frame.png durationInMs" << endl;
+        cerr << "Usage: ffmpeg -i vidoe.mp4 -f yuv4mpegpipe - | ./prepend_frame frame.png durationInMs" << endl;
         return -1;
     }
     const std::string fileName = argv[1];
