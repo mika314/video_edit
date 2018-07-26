@@ -148,7 +148,7 @@ void grabber()
   formatContext = NULL;
   auto fileName = ":0.0+65,126";
   if (inputHeight == 1080)
-    fileName = ":0.0+0,0";
+    fileName = ":0.0+0,74";
   auto format = "x11grab";
   auto inputFormat = av_find_input_format(format);
   if (!inputFormat) 
