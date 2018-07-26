@@ -35,9 +35,6 @@ size_t height;
 double x = 0;
 float zoom = 1.0f;
 
-const int SpecSize = 2048;
-
-
 string fileName;
 
 int lastXX = -1;
@@ -45,7 +42,6 @@ int lastXX2 = -1;
 int sampleRate;
 vector<unsigned char> rgb;
 bool follow = false;
-const int Fps = 24;
 
 bool fileExists(const string &name) 
 {
@@ -208,6 +204,12 @@ void readVideoFile(string fileName)
     case AV_SAMPLE_FMT_NB:
       std::cout << "sample_fmt: NB" << std::endl;
       break;
+    case AV_SAMPLE_FMT_S64:
+      std::cout << "sample_fmt: S64" << std::endl;
+      break;
+    case AV_SAMPLE_FMT_S64P:
+      std::cout << "sample_fmt: S64P" << std::endl;
+      break;
     }                    
     AVPacket packet;
     bool firstAudioFrame = true;
@@ -223,7 +225,7 @@ void readVideoFile(string fileName)
                     audio.push_back(0);
             }
             int gotFrame = 0;
-            AVFrame *decodedFrame = avcodec_alloc_frame();
+            AVFrame *decodedFrame = av_frame_alloc();
             int len = avcodec_decode_audio4(audioDecodec, decodedFrame, &gotFrame, &packet);
             if (len >= 0)
             {
@@ -249,6 +251,16 @@ void readVideoFile(string fileName)
                             int sum = 0;
                             for (int c = 0; c < channels; ++c)
                                 sum += ((float *)decodedFrame->data[0])[i + c * dataSize / sizeof(float) / channels] * 0x8000;
+                            audio.push_back(sum / channels);
+                        }
+                    }
+                    else if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_S16)
+                    {
+                        for (size_t i = 0; i < dataSize / sizeof(int16_t) / channels; ++i)
+                        {
+                            int sum = 0;
+                            for (int c = 0; c < channels; ++c)
+                                sum += ((int16_t *)decodedFrame->data[0])[i + c * dataSize / sizeof(int16_t) / channels];
                             audio.push_back(sum / channels);
                         }
                     }

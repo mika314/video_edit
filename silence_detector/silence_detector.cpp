@@ -55,7 +55,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
                 ave += m;
             }
         }
-        if (sq / ave < 90000 || ave / (SpecSize / 4 - 7) < 0.001 * 0.1 * (32000 * SpecSize))
+        if (sq / ave < 90000 || ave / (SpecSize / 4 - 7) < 0.0012 * 0.1 * (32000 * SpecSize))
         {
             ++silenceCount;
             if (silenceCount > 6)
