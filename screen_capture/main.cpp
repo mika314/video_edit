@@ -16,6 +16,7 @@ extern "C"
 #include <time.h>
 #include <unistd.h>
 #include <vector>
+#include <sstream>
 
 using namespace std;
 int inputWidth;
@@ -135,6 +136,11 @@ void ave(std::vector<short>::iterator sum, unsigned char *rgb, int n)
   }
 }
 
+static int clamp(int x)
+{
+  return std::min(255, std::max(x, 0));
+}
+
 void grabber()
 {
   avcodec_register_all();
@@ -143,36 +149,70 @@ void grabber()
   avfilter_register_all();
 #endif
   av_register_all();
-  AVFormatContext *formatContext;
 
-  formatContext = NULL;
-  auto fileName = ":0.0+65,126";
-  if (inputHeight == 1080)
-    fileName = ":0.0+0,74";
-  auto format = "x11grab";
-  auto inputFormat = av_find_input_format(format);
-  if (!inputFormat) 
-  {
-    cerr << "Unknown input format: '" << format << "'" << endl;
-    exit(1);
-  }
+  auto formatContext = [&]() {
+    AVFormatContext *formatContext = nullptr;
+    auto fileName = ":0.0+65,126";
+    if (inputHeight == 1080)
+      fileName = ":0.0+0,74";
+    auto format = "x11grab";
+    auto inputFormat = av_find_input_format(format);
+    if (!inputFormat)
+    {
+      cerr << "Unknown input format: '" << format << "'" << endl;
+      exit(1);
+    }
 
-  AVDictionary *format_opts = NULL;
-  av_dict_set(&format_opts, "framerate", "1000", 0);
-  string resolution = to_string(inputWidth) + "x" + to_string(inputHeight);
-  av_dict_set(&format_opts, "video_size", resolution.c_str(), 0);
-  int len = avformat_open_input(&formatContext, fileName, inputFormat, &format_opts);
+    AVDictionary *format_opts = NULL;
+    av_dict_set(&format_opts, "framerate", "1000", 0);
+    string resolution = to_string(inputWidth) + "x" + to_string(inputHeight);
+    av_dict_set(&format_opts, "video_size", resolution.c_str(), 0);
+    int len = avformat_open_input(&formatContext, fileName, inputFormat, &format_opts);
+    if (len != 0)
+    {
+      cerr << "Could not open input " << fileName << endl;
+      throw -0x10;
+    }
+    if (avformat_find_stream_info(formatContext, NULL) < 0)
+    {
+      cerr << "Could not read stream information from " << fileName << endl;
+      throw -0x11;
+    }
+    av_dump_format(formatContext, 0, fileName, 0);
+    av_dict_free(&format_opts);
+    return formatContext;
+  }();
 
-  if (len != 0) {
-    cerr << "Could not open input " << fileName << endl;;
-    throw -0x10;
-  }
+  const auto WebcamWidth = 320;
+  const auto WebcamHeight = 240;
 
-  if (avformat_find_stream_info(formatContext, NULL) < 0) {
-    cerr << "Could not read stream information from " <<  fileName << endl;
-    throw -0x11;
-  }
-  av_dump_format(formatContext, 0, fileName, 0);
+  auto webcamFormatContext = [&]() {
+    AVFormatContext *formatContext = nullptr;
+    auto fileName = "/dev/video0";
+    auto format = "v4l2";
+    auto inputFormat = av_find_input_format(format);
+    if (!inputFormat)
+    {
+      std::cerr << "Unknown input format: " << format << std::endl;
+      throw -0x10;
+    }
+
+    AVDictionary *format_opts = nullptr;
+    av_dict_set(&format_opts, "framerate", "1000", 0);
+    std::ostringstream resolution;
+    resolution << WebcamWidth << "x" << WebcamHeight;
+    av_dict_set(&format_opts, "video_size", resolution.str().c_str(), 0);
+    auto err = avformat_open_input(&formatContext, fileName, inputFormat, &format_opts);
+    if (err != 0)
+    {
+      std::cout << "Could not open input " << fileName << std::endl;
+      throw -0x11;
+    }
+
+    av_dump_format(formatContext, 0, fileName, 0);
+    av_dict_free(&format_opts);
+    return formatContext;
+  }();
 
   vector<short> sum;
   vector<unsigned char> yuv;
@@ -187,7 +227,7 @@ void grabber()
   AVPacket packet;
   int64_t currentTs = -1;
   int reminer = 0;
-  int c = 0;
+  int count = 0;
   int totalFrames = 0;
   int64_t initialPts = -1;
   while (av_read_frame(formatContext, &packet) == 0 && !done)
@@ -219,17 +259,44 @@ void grabber()
     t1.join();
     t2.join();
     t3.join();
-    ++c;
+    ++count;
     if (packet.pts > currentTs)
     {
-      std::thread t1(&rgb2yuv, begin(sum), begin(bgr), begin(yuv), begin(yuv) + width * height, begin(yuv) + 5 * width * height / 4, height / 2 / 4, c);
-      std::thread t2(&rgb2yuv, begin(sum) + 3 * width * height / 4, begin(bgr) + 3 * width * height / 4, begin(yuv) + width * height / 4, begin(yuv) + width * height + width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + width * height / 4 / 4, height / 2 / 4, c);
-      std::thread t3(&rgb2yuv, begin(sum) + 2 * 3 * width * height / 4, begin(bgr) + 2 * 3 * width * height / 4, begin(yuv) + 2 * width * height / 4, begin(yuv) + width * height + 2 * width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + 2 * width * height / 4 / 4, height / 2 / 4, c);
-      rgb2yuv(begin(sum) + 3 * 3 * width * height / 4, begin(bgr) + 3 * 3 * width * height / 4, begin(yuv) + 3 * width * height / 4, begin(yuv) + width * height + 3 * width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + 3 * width * height / 4 / 4, height / 2 / 4, c);
+      AVPacket webcamPacket;
+      auto err = av_read_frame(webcamFormatContext, &webcamPacket);
+      if (err == 0)
+      {
+
+        const auto X = width - WebcamWidth - 10;
+        const auto Y = height - WebcamHeight - 10;
+
+        for (auto j = 0; j < WebcamHeight; ++j)
+          for (auto i = 0; i < WebcamWidth; ++i)
+          {
+            auto y = webcamPacket.data[j * WebcamWidth * 2 + i * 2];
+            auto u = webcamPacket.data[j * WebcamWidth * 2 + (i & 0xfffe) * 2 + 1];
+            auto v = webcamPacket.data[j * WebcamWidth * 2 + (i | 0x1) * 2 + 1];
+            auto c = y - 16;
+            auto d = u - 128;
+            auto e = v - 128;
+            auto r = clamp((298 * c + 409 * e + 128) >> 8);
+            auto g = clamp((298 * c - 100 * d - 208 * e + 128) >> 8);
+            auto b = clamp((298 * c + 516 * d + 128) >> 8);
+
+            sum[(X + i + (Y + j) * width) * 3 + 0] = b * count;
+            sum[(X + i + (Y + j) * width) * 3 + 1] = g * count;
+            sum[(X + i + (Y + j) * width) * 3 + 2] = r * count;
+          }
+      }
+
+      std::thread t1(&rgb2yuv, begin(sum), begin(bgr), begin(yuv), begin(yuv) + width * height, begin(yuv) + 5 * width * height / 4, height / 2 / 4, count);
+      std::thread t2(&rgb2yuv, begin(sum) + 3 * width * height / 4, begin(bgr) + 3 * width * height / 4, begin(yuv) + width * height / 4, begin(yuv) + width * height + width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + width * height / 4 / 4, height / 2 / 4, count);
+      std::thread t3(&rgb2yuv, begin(sum) + 2 * 3 * width * height / 4, begin(bgr) + 2 * 3 * width * height / 4, begin(yuv) + 2 * width * height / 4, begin(yuv) + width * height + 2 * width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + 2 * width * height / 4 / 4, height / 2 / 4, count);
+      rgb2yuv(begin(sum) + 3 * 3 * width * height / 4, begin(bgr) + 3 * 3 * width * height / 4, begin(yuv) + 3 * width * height / 4, begin(yuv) + width * height + 3 * width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + 3 * width * height / 4 / 4, height / 2 / 4, count);
       t1.join();
       t2.join();
       t3.join();
-      c = 0;
+      count = 0;
 
       while (packet.pts > currentTs)
       {
@@ -246,7 +313,6 @@ void grabber()
     }
     av_free_packet(&packet);
   }
-  av_dict_free(&format_opts);
   avformat_free_context(formatContext);
 }
 
