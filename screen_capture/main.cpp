@@ -288,6 +288,7 @@ void grabber()
             sum[(X + i + (Y + j) * width) * 3 + 2] = r * count;
           }
       }
+      av_free_packet(&webcamPacket);
 
       std::thread t1(&rgb2yuv, begin(sum), begin(bgr), begin(yuv), begin(yuv) + width * height, begin(yuv) + 5 * width * height / 4, height / 2 / 4, count);
       std::thread t2(&rgb2yuv, begin(sum) + 3 * width * height / 4, begin(bgr) + 3 * width * height / 4, begin(yuv) + width * height / 4, begin(yuv) + width * height + width * height / 4 / 4, begin(yuv) + 5 * width * height / 4 + width * height / 4 / 4, height / 2 / 4, count);
@@ -314,6 +315,7 @@ void grabber()
     av_free_packet(&packet);
   }
   avformat_free_context(formatContext);
+  avformat_free_context(webcamFormatContext);
 }
 
 thread *t;
