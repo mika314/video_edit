@@ -260,6 +260,16 @@ void readVideoFile(string fileName)
                         {
                             int sum = 0;
                             for (int c = 0; c < channels; ++c)
+                                sum += ((int16_t *)decodedFrame->data[0])[i * channels + c];
+                            audio.push_back(sum / channels);
+                        }
+                    }
+                    else if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_S16P)
+                    {
+                        for (size_t i = 0; i < dataSize / sizeof(int16_t) / channels; ++i)
+                        {
+                            int sum = 0;
+                            for (int c = 0; c < channels; ++c)
                                 sum += ((int16_t *)decodedFrame->data[0])[i + c * dataSize / sizeof(int16_t) / channels];
                             audio.push_back(sum / channels);
                         }
