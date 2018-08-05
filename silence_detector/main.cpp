@@ -39,7 +39,6 @@ string fileName;
 
 int lastXX = -1;
 int lastXX2 = -1;
-int sampleRate;
 vector<unsigned char> rgb;
 bool follow = false;
 
@@ -87,12 +86,12 @@ void readVideoFile(string fileName)
     int videoStreamIndex = -1;
 
     for (unsigned i = 0; i < formatContext->nb_streams; ++i)
-        if (formatContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
+        if (formatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
         {
             if (audioStreamIndex == -1)
                 audioStreamIndex = i;
         }
-        else if (formatContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+        else if (formatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
         {
             if (videoStreamIndex == -1)
                 videoStreamIndex = i;
@@ -217,12 +216,20 @@ void readVideoFile(string fileName)
     {
         if (packet.stream_index == audioStreamIndex)
         {
+            const auto c = packet.pts * audioDecodec->pkt_timebase.num * audioDecodec->sample_rate / audioDecodec->pkt_timebase.den;
             if (firstAudioFrame)
             {
                 firstAudioFrame = false;
-                const auto c = packet.pts * audioDecodec->time_base.num * audioDecodec->sample_rate / audioDecodec->time_base.den;
                 for (int i = 0; i < c; ++i)
                     audio.push_back(0);
+            }
+            else
+            {
+              if (std::abs(static_cast<long long>(c) - static_cast<long long>(audio.size())) > 44100 / 30)
+              {
+                  std::clog << "Time correction: " << audio.size() << " to " << c << std::endl;
+                  audio.resize(c);
+              }
             }
             int gotFrame = 0;
             AVFrame *decodedFrame = av_frame_alloc();
@@ -278,14 +285,14 @@ void readVideoFile(string fileName)
             }
             av_free(decodedFrame);
         }
-        av_free_packet(&packet);
+        av_packet_unref(&packet);
     }
 }
 
 void saveAudio()
 {
-    int skip = 0;
-    size_t currentSample = 0;
+    ssize_t inputSample = 0;
+    ssize_t outputSample = 0;
 
     int skipCount = 0;
 
@@ -293,34 +300,31 @@ void saveAudio()
     vector<int16_t> result;
     vector<int> sum;
     int speedUp = 6;
-    while (currentSample < audio.size())
+    while (inputSample < static_cast<ssize_t>(audio.size()))
     {
         vector<int16_t> buff;
-        auto v = audio[currentSample];
-        size_t frameSize;
-        frameSize = 1024;;
-        while (buff.size() < frameSize || ((v >= 0 || audio[currentSample] <= 0) && (abs(v) >= 10 || abs(audio[currentSample]) >= 10)))
+        auto v = audio[inputSample];
+        const size_t frameSize = 1024;
+        while (buff.size() < frameSize || ((v >= 0 || audio[inputSample] <= 0) && (abs(v) >= 10 || abs(audio[inputSample]) >= 10)))
         {
-            v = audio[currentSample];
+            v = audio[inputSample];
             buff.push_back(v);
-            ++currentSample;
-            if (currentSample >= audio.size())
+            ++inputSample;
+            ++outputSample;
+            if (inputSample >= static_cast<ssize_t>(audio.size()))
                 break;
         }
-        if (removeRange != end(rmList) && static_cast<int>(currentSample) > removeRange->start)
+        if (removeRange != end(rmList) && inputSample > removeRange->start)
         {
             speedUp = removeRange->speedUp;
-            skip += 1LL * (removeRange->end - removeRange->start) * (speedUp - 1) / speedUp;
-            cout << currentSample << "\t" << 1.0 * currentSample / sampleRate << "\tskip + " 
-                 << 1.0 * 1LL * (removeRange->end - removeRange->start) * (speedUp - 1) / speedUp / sampleRate<< " =\t" 
-                 << 1.0 * skip / sampleRate << "\t" 
+            outputSample -= removeRange->end - removeRange->start - (removeRange->end - removeRange->start) / speedUp;
+            cout << inputSample << "\t" << inputSample << "\tskip + "
+                 << (removeRange->end - removeRange->start) * (speedUp - 1) / speedUp << " =\t" 
                  << speedUp << endl;
             ++removeRange;
         }
-        cout << currentSample << " " << skip << " " << currentSample + skip << endl;
-        if (skip > 0 && skipCount < speedUp)
+        if (static_cast<ssize_t>(result.size()) > outputSample && skipCount < speedUp)
         {
-            skip -= buff.size();
             if (sum.size() < buff.size())
                 sum.resize(buff.size());
             
@@ -346,7 +350,6 @@ void saveAudio()
                         r = -0x7800;
                     result.push_back(r);
                 }
-                skip += sum.size() - buff.size();
             }
             else
                 for (size_t i = 0; i < buff.size(); ++i)

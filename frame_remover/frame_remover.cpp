@@ -81,8 +81,9 @@ int main(int argc, char **argv)
     for (auto ave = yuvAve; ave != yuvAve + w * h * 3 / 2; ++ave)
         *ave = 0;
 
-    int skip = 0;
-    int currentFrame = 0;
+    ssize_t inputSample = 0;
+    ssize_t outputSample = 0;
+    ssize_t frameNum = 0;
 
     int skipCount = 0;
     int speedUp = 6;
@@ -98,29 +99,29 @@ int main(int argc, char **argv)
         } while (strcmp(line, "FRAME") != 0);
 
         cin.read((char *)yuv, w * h * 3 / 2);
-        ++currentFrame;
-        if (frames.size() > 0 && 1LL * currentFrame * sampleRate / fps > get<0>(*frames.begin()))
+        inputSample += sampleRate / fps;
+        outputSample += sampleRate / fps;
+        if (!frames.empty())
         {
-            if (skip > 0)
-                speedUp = std::max(speedUp, get<2>(*frames.begin()));
-            else
-                speedUp = get<2>(*frames.begin());
-            skip += 1LL * (get<1>(*frames.begin()) - get<0>(*frames.begin())) * (get<2>(*frames.begin()) - 1) / get<2>(*frames.begin());
-            clog << get<1>(*frames.begin()) << " " <<  get<0>(*frames.begin()) << endl;
+          auto removeRange = *frames.begin();
+          if (inputSample > get<0>(removeRange))
+          {
+            speedUp = get<2>(removeRange);
+            outputSample -= get<1>(removeRange) - get<0>(removeRange) -
+                            (get<1>(removeRange) - get<0>(removeRange)) / speedUp;
+            clog << get<1>(*frames.begin()) << " " << get<0>(*frames.begin()) << endl;
             frames.erase(frames.begin());
+          }
         }
-        if (skip > 0 && skipCount < speedUp)
+        if (frameNum * sampleRate / fps > outputSample && skipCount < speedUp)
         {
-            skip -= sampleRate / fps;
-            {
-                auto cur = yuv;
-                auto ave = yuvAve;
-                for (; ave < yuvAve + w * h; ++ave, ++cur)
-                    *ave += *cur;
-                for (; ave < yuvAve + w * h * 3 / 2; ++ave, ++cur)
-                    *ave += *cur - 128;
-            }
-            ++skipCount;
+          auto cur = yuv;
+          auto ave = yuvAve;
+          for (; ave < yuvAve + w * h; ++ave, ++cur)
+            *ave += *cur;
+          for (; ave < yuvAve + w * h * 3 / 2; ++ave, ++cur)
+            *ave += *cur - 128;
+          ++skipCount;
         }
         else
         {
@@ -139,6 +140,7 @@ int main(int argc, char **argv)
                     *cur = (*ave + *cur - 128) / skipCount + 128;
                     *ave = 0;
                 }
+                ++frameNum;
             }
             cout.write((char *)yuv, w * h * 3 / 2);
             skipCount = 0;
