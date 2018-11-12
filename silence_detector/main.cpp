@@ -257,7 +257,7 @@ void readVideoFile(string fileName)
                         {
                             int sum = 0;
                             for (int c = 0; c < channels; ++c)
-                                sum += ((float *)decodedFrame->data[0])[i + c * dataSize / sizeof(float) / channels] * 0x8000;
+                              sum += ((float *)decodedFrame->data[c])[i] * 0x8000;
                             audio.push_back(sum / channels);
                         }
                     }

@@ -11,6 +11,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
 {
     std::set<Range, Cmp> result;
     const int SpecSize = 2048;
+    const auto CutFreq = 200.0f;
 
     fftw_complex *fftIn;
     fftw_complex *fftOut;
@@ -44,7 +45,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
         double ave = 0;
         double sq = 0;
         int c = 0;
-        for (auto f = fftOut; f < fftOut + SpecSize / 2; ++f)
+        for (auto f = fftOut + static_cast<int>(CutFreq * SpecSize / 44100.0f); f < fftOut + SpecSize / 2; ++f)
         {
             double tmp = *f[0] * *f[0] + *f[1] * *f[1];
             double m = sqrt(tmp);

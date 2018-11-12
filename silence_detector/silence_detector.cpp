@@ -11,6 +11,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
 {
     std::set<Range, Cmp> result;
     const int SpecSize = 2048;
+    const auto CutFreq = 200.0f;
 
     fftw_complex *fftIn;
     fftw_complex *fftOut;
@@ -44,7 +45,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
         double ave = 0;
         double sq = 0;
         int c = 0;
-        for (auto f = fftOut; f < fftOut + SpecSize / 2; ++f)
+        for (auto f = fftOut + static_cast<int>(CutFreq * SpecSize / 44100.0f); f < fftOut + SpecSize / 2; ++f)
         {
             double tmp = *f[0] * *f[0] + *f[1] * *f[1];
             double m = sqrt(tmp);
@@ -55,7 +56,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
                 ave += m;
             }
         }
-        if (sq / ave < 90000 || ave / (SpecSize / 4 - 7) < 0.002 * 0.1 * (32000 * SpecSize))
+        if (sq / ave < 90000 || ave / (SpecSize / 4 - 7) < 0.001 * 0.1 * (32000 * SpecSize))
         {
             ++silenceCount;
             if (silenceCount > 6)
@@ -67,9 +68,11 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
         }
         else
         {
+            cout << "voice " << ave / (SpecSize / 4 - 7) << " " << 0.08 * 0.1 * (32000 * SpecSize) << endl;
             if (state == Silence)
                 if (static_cast<int>(p) - SpecSize > start)
                 {
+                    cout << start << " " << p - SpecSize << endl;
                     result.insert(Range(start, p - SpecSize));
                 }
             state = Voice;

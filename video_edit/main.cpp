@@ -41,7 +41,7 @@ int thumbHeight;
 int thumbWidth;
 size_t width;
 size_t height;
-double x = 0;
+double g_x = 0;
 float zoom = 1.0f;
 
 const int SpecSize = 2048;
@@ -161,7 +161,7 @@ void display()
   glOrtho (0, width, 0x8000, -0x8000, -1, 1);
   auto p = pos;
   auto l = latency;
-  auto sx = (p - x - l * sampleRate / 1000000) / zoom;
+  auto sx = (p - g_x - l * sampleRate / 1000000) / zoom;
   glClear(GL_COLOR_BUFFER_BIT);
   glBegin(GL_QUADS);
   for (auto r: rmList)
@@ -170,8 +170,8 @@ void display()
       glColor3f(0.2, 0.0, 0.0);
     else
       glColor3f(0.9, 0.0, 0.0);
-    int x1 = (r.start - x) / zoom;
-    int x2 = (r.end - x) / zoom;
+    int x1 = (r.start - g_x) / zoom;
+    int x2 = (r.end - g_x) / zoom;
     glVertex2f(x1, -0x8000);
     glVertex2f(x2, -0x8000);
     glVertex2f(x2, 0x8000);
@@ -195,8 +195,8 @@ void display()
   glBegin(GL_LINE_STRIP);
   for (size_t sx = 0; sx < width; ++sx)
   {
-    int x1 = sx * zoom + x;
-    int x2 = (sx + 1) * zoom + x;
+    int x1 = sx * zoom + g_x;
+    int x2 = (sx + 1) * zoom + g_x;
     if (x1 < 0)
       x1 = 0;
     if (x1 >= static_cast<int>(audio.size()))
@@ -241,7 +241,7 @@ void display()
   {
     for (size_t sx = 0; sx < width; sx += thumbWidth)
     {
-      int x1 = (sx * zoom + x) * Fps / sampleRate;
+      int x1 = (sx * zoom + g_x) * Fps / sampleRate;
       if (x1 < 0)
         x1 = 0;
       if (x1 >= static_cast<int>(audio.size() * Fps / sampleRate))
@@ -348,12 +348,12 @@ int readAudio(string fileName)
   int videoStreamIndex = -1;
 
   for (unsigned i = 0; i < formatContext->nb_streams; ++i)
-    if (formatContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
+    if (formatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
     {
       if (audioStreamIndex == -1)
         audioStreamIndex = i;
     }
-    else if (formatContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+    else if (formatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
     {
       if (videoStreamIndex == -1)
         videoStreamIndex = i;
@@ -369,7 +369,7 @@ int readAudio(string fileName)
     throw -0x34;
   }
 
-  auto codec = formatContext->streams[audioStreamIndex]->codec;
+  auto codec = formatContext->streams[audioStreamIndex]->codecpar;
   AVCodecContext *audioDecodec;
   {
     if(codec->codec_id == 0)
@@ -389,7 +389,7 @@ int readAudio(string fileName)
       cerr << "Could not alloc context for decoder " << c->name << endl;
       throw -0x32;
     }
-    avcodec_copy_context(audioDecodec, codec);
+    avcodec_parameters_to_context(audioDecodec, codec);
     int ret = avcodec_open2(audioDecodec, c, NULL);
     if (ret < 0)
     {
@@ -438,6 +438,12 @@ int readAudio(string fileName)
   case AV_SAMPLE_FMT_NB:
     std::cout << "sample_fmt: NB" << std::endl;
     break;
+  case AV_SAMPLE_FMT_S64:
+    std::cout << "sample_fmt: S64" << std::endl;
+    break;
+  case AV_SAMPLE_FMT_S64P:
+    std::cout << "sample_fmt: S64P" << std::endl;
+    break;
   }
   AVPacket packet;
   bool firstAudioFrame = true;
@@ -478,7 +484,7 @@ int readAudio(string fileName)
             {
               int sum = 0;
               for (int c = 0; c < channels; ++c)
-                sum += ((float *)decodedFrame->data[0])[i + c * dataSize / sizeof(float) / channels] * 0x8000;
+                sum += ((float *)decodedFrame->data[c])[i] * 0x8000;
               audio.push_back(sum / channels);
             }
           }
@@ -490,7 +496,7 @@ int readAudio(string fileName)
     {
       ++framesNum;
     }
-    av_free_packet(&packet);
+    av_packet_unref(&packet);
   }
   avcodec_close(audioDecodec);
   av_free(audioDecodec);
@@ -537,7 +543,7 @@ void readVideo(const std::string &fileName, int framesNum)
   int videoStreamIndex = -1;
 
   for (unsigned i = 0; i < formatContext->nb_streams; ++i)
-    if (formatContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+    if (formatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
     {
       if (videoStreamIndex == -1)
         videoStreamIndex = i;
@@ -548,7 +554,7 @@ void readVideo(const std::string &fileName, int framesNum)
     throw -0x34;
   }
 
-  auto codec = formatContext->streams[videoStreamIndex]->codec;
+  auto codec = formatContext->streams[videoStreamIndex]->codecpar;
   AVCodecContext *videoDecodec;
   {
     if(codec->codec_id == 0)
@@ -568,7 +574,7 @@ void readVideo(const std::string &fileName, int framesNum)
       cerr << "Could not alloc context for decoder " << c->name << endl;
       throw -0x32;
     }
-    avcodec_copy_context(videoDecodec, codec);
+    avcodec_parameters_to_context(videoDecodec, codec);
     int ret = avcodec_open2(videoDecodec, c, NULL);
     if (ret < 0)
     {
@@ -637,7 +643,7 @@ void readVideo(const std::string &fileName, int framesNum)
       }
       av_free(decodedFrame);
     }
-    av_free_packet(&packet);
+    av_packet_unref(&packet);
   }
   av_free(buffer);
   av_free(rgbFrame);
@@ -651,14 +657,14 @@ void readVideo(const std::string &fileName, int framesNum)
 int lastX = -1;
 int lastMouseX = -1;
 
-void mouse(int button, int state, int x, int y)
+void mouse(int button, int state, int x, int /*y*/)
 {
   if (button == GLUT_RIGHT_BUTTON)
   {
     follow = false;
     if (state == GLUT_DOWN)
     {
-      lastX = ::x;
+      lastX = g_x;
       lastMouseX = x;
     }
     else if (state == GLUT_UP)
@@ -672,7 +678,7 @@ void mouse(int button, int state, int x, int y)
     {
       if (abs(lastXX - x) < 3)
       {
-        auto p = x * zoom + ::x;
+        auto p = x * zoom + g_x;
         if (p < 0)
           p = 0;
         if (p >= audio.size())
@@ -681,8 +687,8 @@ void mouse(int button, int state, int x, int y)
       }
       else
       {
-        auto p1 = lastXX * zoom + ::x;
-        auto p2 = x * zoom + ::x;
+        auto p1 = lastXX * zoom + g_x;
+        auto p2 = x * zoom + g_x;
         if ((glutGetModifiers() & GLUT_ACTIVE_ALT) == 0)
         {
           bool isDel = false;
@@ -701,8 +707,8 @@ void mouse(int button, int state, int x, int y)
             {
               rs.push_back(i->start);
               rs.push_back(i->end);
-              rmList.erase(i);
               speedUp = i->speedUp;
+              rmList.erase(i);
             }
             if (!rs.empty())
             {
@@ -781,15 +787,15 @@ void mouse(int button, int state, int x, int y)
     {
       auto zoom0 = zoom;
       zoom *= pow(1.3, 3 * (button - 3.5f));
-      ::x = x * zoom0 + ::x - x * zoom;
+      g_x = x * zoom0 + g_x - x * zoom;
       glutPostRedisplay();
     }
 }
 
-void motion(int x, int y)
+void motion(int x, int /*y*/)
 {
   if (lastX != -1)
-    ::x = lastX + (lastMouseX - x) * zoom;
+    g_x = lastX + (lastMouseX - x) * zoom;
   if (lastXX != -1)
     lastXX2 = x;
   glutPostRedisplay();
@@ -945,22 +951,22 @@ void timer(int = 0)
   auto l = latency;
   if (state == Playing)
   {
-    auto sx = (p - x - l * sampleRate / 1000000) / zoom;
+    auto sx = (p - g_x - l * sampleRate / 1000000) / zoom;
     if (sx < 0 || sx > width || follow)
     {
       follow = true;
       double tmp = p - l * sampleRate / 1000000 - (width / 10) * zoom;
-      if (abs(0.00001 * (tmp - x)) > 10)
-        x = x + 0.00001 * (tmp - x);
+      if (abs(0.00001 * (tmp - g_x)) > 10)
+        g_x = g_x + 0.00001 * (tmp - g_x);
       else
-        x = tmp;
+        g_x = tmp;
     }
   }
   glutTimerFunc(0, timer, 0);
   glutPostRedisplay();
 }
 
-void keyboard(unsigned char key, int x, int y)
+void keyboard(unsigned char key, int /*x*/, int /*y*/)
 {
   if (key == ' ')
   {
@@ -1005,7 +1011,7 @@ void keyboard(unsigned char key, int x, int y)
 
 }
 
-void special(int key, int x, int y)
+void special(int key, int /*x*/, int /*y*/)
 {
   if (state == Stop)
   {
@@ -1028,9 +1034,9 @@ void special(int key, int x, int y)
       pos = p;
       glutPostRedisplay();
     }
-    auto sx = (p - ::x - l * sampleRate / 1000000) / zoom;
+    auto sx = (p - g_x - l * sampleRate / 1000000) / zoom;
     if (sx < 0 || sx > width)
-      ::x = p - l * sampleRate / 1000000 - (width / 10) * zoom;
+      g_x = p - l * sampleRate / 1000000 - (width / 10) * zoom;
   }
 }
 
@@ -1095,3 +1101,4 @@ int main(int argc, char **argv)
   atexit(bye);
   glutMainLoop();
 }
+
