@@ -18,7 +18,7 @@ struct Range
 class Cmp
 {
 public:
-    bool operator()(const Range &x, const Range &y) { return x.start < y.start && x.end < y.start; }
+    bool operator()(const Range &x, const Range &y) const { return x.start < y.start && x.end < y.start; }
 };
 
 std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio);
