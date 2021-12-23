@@ -1,46 +1,46 @@
 #include "silence_detector.h"
 #include <GL/glut.h>
-#ifndef INT64_C
-#define INT64_C(c) (c ## LL)
-#define UINT64_C(c) (c ## ULL)
-#endif
-extern "C"
-{
-#include <libavformat/avformat.h>
-#include <libavdevice/avdevice.h>
-#include <libswscale/swscale.h>
-}
 #include <algorithm>
 #include <cassert>
+#include <fcntl.h>
+#include <fftw3.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <sstream>
-#include <thread>
-#include <vector>
-
-#include <fcntl.h>
-#include <fftw3.h>
+#include <memory>
 #include <pulse/error.h>
 #include <pulse/simple.h>
+#include <sstream>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/types.h>
+#include <thread>
 #include <unistd.h>
+#include <vector>
+
+#ifndef INT64_C
+#define INT64_C(c) (c##LL)
+#define UINT64_C(c) (c##ULL)
+#endif
+extern "C" {
+#include <libavdevice/avdevice.h>
+#include <libavformat/avformat.h>
+#include <libswscale/swscale.h>
+}
 
 using namespace std;
 
-
-set<Range, Cmp > rmList;
-vector<vector<pair<int16_t, int16_t> > > minMax;
-unsigned char *thumbs = nullptr;
-size_t thumsSize = 0;
-int thumbLinesize;
+set<Range, Cmp> rmList;
+vector<vector<pair<int16_t, int16_t>>> minMax;
+unsigned char *proxy = nullptr;
+size_t proxySize = 0;
+int proxyLinesize;
+int proxyHeight;
+int proxyWidth;
 int thumbHeight;
 int thumbWidth;
-size_t width;
-size_t height;
+int width;
+int height;
 double g_x = 0;
 float zoom = 1.0f;
 
@@ -61,7 +61,7 @@ bool follow = false;
 fftw_complex *fftIn;
 fftw_complex *fftOut;
 fftw_plan plan;
-const double Fps = 29.97002997;
+const double Fps = 30;
 
 vector<int16_t> audio;
 
@@ -72,8 +72,8 @@ void minMaxCalc()
   const auto mm = make_pair(numeric_limits<int16_t>::max(), numeric_limits<int16_t>::min());
   while (n > 0)
   {
-    minMax.push_back(vector<pair<int16_t, int16_t> >(n + 1));
-    for (auto &i: minMax.back())
+    minMax.push_back(vector<pair<int16_t, int16_t>>(n + 1));
+    for (auto &i : minMax.back())
       i = mm;
     n /= 2;
   }
@@ -94,7 +94,7 @@ void minMaxCalc()
     }
   }
   ofstream f(fileName + ".pcs");
-  for (const auto &i: minMax)
+  for (const auto &i : minMax)
     f.write((const char *)&i[0], i.size() * sizeof(i[0]));
 }
 
@@ -132,18 +132,18 @@ void drawSpec()
   const double dmax = 1;
 
   glLoadIdentity();
-  glOrtho(0, width, -Max * thumbHeight / (height - thumbHeight), Max, -1, 1);
+  glOrtho(0, width, -Max * thumbHeight / (height - thumbHeight - proxyHeight), Max * proxyHeight / (height - thumbHeight - proxyHeight), -1, 1);
   glColor3f(0.0, 0.6, 0.0);
   glBegin(GL_LINES);
-  for (size_t x = 0; x < width; ++x)
+  for (auto x = 0; x < width; ++x)
   {
-    double m = s[x * SpecSize / width /  4];
+    double m = s[x * SpecSize / width / 4];
     glVertex2f(x, m);
     glVertex2f(x, 0);
   }
   glEnd();
   glLoadIdentity();
-  glOrtho(0, width, -dmax * thumbHeight / (height - thumbHeight), dmax, -1, 1);
+  glOrtho(0, width, -dmax * thumbHeight / (height - thumbHeight - proxyHeight), dmax * proxyHeight / (height - thumbHeight - proxyHeight), -1, 1);
   if (sq / ave / 2000000.0 < 0.03 || ave / (SpecSize / 4 - 7) < 0.001 * Max)
     glColor3f(0.5, 0.5, 0.0);
   else
@@ -158,13 +158,18 @@ void display()
 {
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
-  glOrtho (0, width, 0x8000, -0x8000, -1, 1);
+
+  const auto Range = 0x10000 * height / (height - thumbHeight - proxyHeight);
+  const auto minY = -thumbHeight * Range / height - 0x8000;
+  const auto maxY = minY + Range;
+
+  glOrtho(0, width, minY, maxY, -1, 1);
   auto p = pos;
   auto l = latency;
   auto sx = (p - g_x - l * sampleRate / 1000000) / zoom;
   glClear(GL_COLOR_BUFFER_BIT);
   glBegin(GL_QUADS);
-  for (auto r: rmList)
+  for (auto r : rmList)
   {
     if (r.speedUp < 100)
       glColor3f(0.2, 0.0, 0.0);
@@ -193,7 +198,7 @@ void display()
   }
   glColor3f(0, 0, 0.5);
   glBegin(GL_LINE_STRIP);
-  for (size_t sx = 0; sx < width; ++sx)
+  for (auto sx = 0; sx < width; ++sx)
   {
     int x1 = sx * zoom + g_x;
     int x2 = (sx + 1) * zoom + g_x;
@@ -232,34 +237,34 @@ void display()
     glVertex2f(sx, mm.second);
   }
   glEnd();
-  const int linesize = thumbWidth * 3;
+  const int linesize = proxyWidth * 3;
   glLoadIdentity();
   glOrtho(0, width, height, 0, -1, 1);
   glEnable(GL_TEXTURE_2D);
   glColor3f(1, 1, 1);
-  if (thumbs != nullptr && thumsSize != 0)
+  if (proxy != nullptr && proxySize != 0)
   {
-    for (size_t sx = 0; sx < width; sx += thumbWidth)
+    for (auto sx = 0; sx < width; sx += thumbWidth)
     {
       int x1 = (sx * zoom + g_x) * Fps / sampleRate;
       if (x1 < 0)
         x1 = 0;
       if (x1 >= static_cast<int>(audio.size() * Fps / sampleRate))
         x1 = audio.size() * Fps / sampleRate - 1;
-      rgb.resize(linesize * thumbHeight);
-      auto offset = static_cast<size_t>(x1) * linesize * thumbHeight;
-      if (offset + linesize * thumbHeight < thumsSize)
-        memcpy(rgb.data(), thumbs + offset, linesize * thumbHeight);
-      glTexImage2D(GL_TEXTURE_2D, 0, 3, thumbWidth, thumbHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &rgb[0]);
+      rgb.resize(linesize * proxyHeight);
+      auto offset = static_cast<size_t>(x1) * linesize * proxyHeight;
+      if (offset + linesize * proxyHeight < proxySize)
+        memcpy(rgb.data(), proxy + offset, linesize * proxyHeight);
+      glTexImage2D(GL_TEXTURE_2D, 0, 3, proxyWidth, proxyHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &rgb[0]);
       glBegin(GL_QUADS);
 
-      glTexCoord2f(0, 1.0f - 1.0f / thumbHeight);
+      glTexCoord2f(0, 1.0f - 1.0f / proxyHeight);
       glVertex2f(sx, height);
 
-      glTexCoord2f(1.0f - 1.0f / thumbWidth, 1.0f - 1.0f / thumbHeight);
+      glTexCoord2f(1.0f - 1.0f / proxyWidth, 1.0f - 1.0f / proxyHeight);
       glVertex2f(sx + thumbWidth - 1, height);
 
-      glTexCoord2f(1.0f - 1.0f / thumbWidth, 0);
+      glTexCoord2f(1.0f - 1.0f / proxyWidth, 0);
       glVertex2f(sx + thumbWidth - 1, height - (thumbHeight - 1));
 
       glTexCoord2f(0, 0);
@@ -267,23 +272,23 @@ void display()
 
       glEnd();
     }
-    auto offset = static_cast<size_t>((p - l * sampleRate / 1000000) * Fps / sampleRate) * linesize * thumbHeight;
-    if (offset + linesize * thumbHeight < thumsSize)
-      memcpy(rgb.data(), thumbs + offset, linesize * thumbHeight);
-    glTexImage2D(GL_TEXTURE_2D, 0, 3, thumbWidth, thumbHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &rgb[0]);
+    auto offset = static_cast<size_t>((p - l * sampleRate / 1000000) * Fps / sampleRate) * linesize * proxyHeight;
+    if (offset + linesize * proxyHeight < proxySize)
+      memcpy(rgb.data(), proxy + offset, linesize * proxyHeight);
+    glTexImage2D(GL_TEXTURE_2D, 0, 3, proxyWidth, proxyHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &rgb[0]);
     glBegin(GL_QUADS);
 
-    glTexCoord2f(1.0f - 1.0f / thumbWidth, 0);
+    glTexCoord2f(1.0f - 1.0f / proxyWidth, 0);
     glVertex2f(width - 1, 0);
 
     glTexCoord2f(0, 0);
-    glVertex2f(width - thumbWidth * 2,  0);
+    glVertex2f(width - proxyWidth, 0);
 
-    glTexCoord2f(0, 1.0f - 1.0f / thumbHeight);
-    glVertex2f(width - thumbWidth * 2, (thumbHeight * 2 - 1));
+    glTexCoord2f(0, 1.0f - 1.0f / proxyHeight);
+    glVertex2f(width - proxyWidth, proxyHeight - 1);
 
-    glTexCoord2f(1.0f - 1.0f / thumbWidth, 1.0f - 1.0f / thumbHeight);
-    glVertex2f(width - 1, (thumbHeight * 2 - 1));
+    glTexCoord2f(1.0f - 1.0f / proxyWidth, 1.0f - 1.0f / proxyHeight);
+    glVertex2f(width - 1, proxyHeight - 1);
 
     glEnd();
   }
@@ -303,18 +308,17 @@ void reshape(int w, int h)
 {
   width = w;
   height = h;
-  glViewport(0, 0, w, h);  
+  glViewport(0, 0, w, h);
 }
 
-bool fileExists(const string &name) 
+bool fileExists(const string &name)
 {
   return ifstream(name).good();
 }
 
 struct Frame
 {
-  Frame(std::string fileName):
-    file(fileName)
+  Frame(std::string fileName) : file(fileName)
   {
     if (!file.is_open())
       throw runtime_error(string("file ") + fileName + " is not open ");
@@ -331,15 +335,16 @@ int readAudio(string fileName)
   av_register_all();
   AVFormatContext *formatContext = NULL;
   int len = avformat_open_input(&formatContext, fileName.c_str(), nullptr, nullptr);
-  if (len != 0) 
+  if (len != 0)
   {
-    cerr << "Could not open input " << fileName << endl;;
+    cerr << "Could not open input " << fileName << endl;
+    ;
     throw -0x10;
   }
-    
-  if (avformat_find_stream_info(formatContext, NULL) < 0) 
+
+  if (avformat_find_stream_info(formatContext, NULL) < 0)
   {
-    cerr << "Could not read stream information from " <<  fileName << endl;
+    cerr << "Could not read stream information from " << fileName << endl;
     throw -0x11;
   }
   av_dump_format(formatContext, 0, fileName.c_str(), 0);
@@ -372,12 +377,12 @@ int readAudio(string fileName)
   auto codec = formatContext->streams[audioStreamIndex]->codecpar;
   AVCodecContext *audioDecodec;
   {
-    if(codec->codec_id == 0)
+    if (codec->codec_id == 0)
     {
       cerr << "-0x30" << endl;
       throw -0x30;
     }
-    AVCodec* c = avcodec_find_decoder(codec->codec_id);
+    AVCodec *c = avcodec_find_decoder(codec->codec_id);
     if (c == NULL)
     {
       cerr << "Could not find decoder ID " << codec->codec_id << endl;
@@ -402,48 +407,20 @@ int readAudio(string fileName)
   std::cout << "channels: " << channels << std::endl;
   switch (audioDecodec->sample_fmt)
   {
-  case AV_SAMPLE_FMT_NONE:
-    std::cout << "sample_fmt: AV_SAMPLE_FMT_NONE" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_U8:
-    std::cout << "sample_fmt: U8" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_S16:
-    std::cout << "sample_fmt: S16" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_S32:
-    std::cout << "sample_fmt: S32" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_FLT:
-    std::cout << "sample_fmt: FLT" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_DBL:
-    std::cout << "sample_fmt: DBL" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_U8P:
-    std::cout << "sample_fmt: U8P" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_S16P:
-    std::cout << "sample_fmt: S16P" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_S32P:
-    std::cout << "sample_fmt: S32P" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_FLTP:
-    std::cout << "sample_fmt: FLTP" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_DBLP:
-    std::cout << "sample_fmt: DBLP" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_NB:
-    std::cout << "sample_fmt: NB" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_S64:
-    std::cout << "sample_fmt: S64" << std::endl;
-    break;
-  case AV_SAMPLE_FMT_S64P:
-    std::cout << "sample_fmt: S64P" << std::endl;
-    break;
+  case AV_SAMPLE_FMT_NONE: std::cout << "sample_fmt: AV_SAMPLE_FMT_NONE" << std::endl; break;
+  case AV_SAMPLE_FMT_U8: std::cout << "sample_fmt: U8" << std::endl; break;
+  case AV_SAMPLE_FMT_S16: std::cout << "sample_fmt: S16" << std::endl; break;
+  case AV_SAMPLE_FMT_S32: std::cout << "sample_fmt: S32" << std::endl; break;
+  case AV_SAMPLE_FMT_FLT: std::cout << "sample_fmt: FLT" << std::endl; break;
+  case AV_SAMPLE_FMT_DBL: std::cout << "sample_fmt: DBL" << std::endl; break;
+  case AV_SAMPLE_FMT_U8P: std::cout << "sample_fmt: U8P" << std::endl; break;
+  case AV_SAMPLE_FMT_S16P: std::cout << "sample_fmt: S16P" << std::endl; break;
+  case AV_SAMPLE_FMT_S32P: std::cout << "sample_fmt: S32P" << std::endl; break;
+  case AV_SAMPLE_FMT_FLTP: std::cout << "sample_fmt: FLTP" << std::endl; break;
+  case AV_SAMPLE_FMT_DBLP: std::cout << "sample_fmt: DBLP" << std::endl; break;
+  case AV_SAMPLE_FMT_NB: std::cout << "sample_fmt: NB" << std::endl; break;
+  case AV_SAMPLE_FMT_S64: std::cout << "sample_fmt: S64" << std::endl; break;
+  case AV_SAMPLE_FMT_S64P: std::cout << "sample_fmt: S64P" << std::endl; break;
   }
   AVPacket packet;
   bool firstAudioFrame = true;
@@ -465,9 +442,7 @@ int readAudio(string fileName)
       {
         if (gotFrame)
         {
-          int dataSize = av_samples_get_buffer_size(nullptr, channels,
-                                                    decodedFrame->nb_samples,
-                                                    audioDecodec->sample_fmt, 1);
+          int dataSize = av_samples_get_buffer_size(nullptr, channels, decodedFrame->nb_samples, audioDecodec->sample_fmt, 1);
           if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_FLT)
           {
             for (size_t i = 0; i < dataSize / sizeof(float) / channels; ++i)
@@ -512,7 +487,7 @@ int readAudio(string fileName)
     int n = audio.size() / 2;
     while (n > 0)
     {
-      minMax.push_back(vector<pair<int16_t, int16_t> >(n + 1));
+      minMax.push_back(vector<pair<int16_t, int16_t>>(n + 1));
       f.read((char *)&minMax.back()[0], minMax.back().size() * sizeof(minMax.back()[0]));
       n /= 2;
     }
@@ -527,15 +502,16 @@ void readVideo(const std::string &fileName, int framesNum)
   formatContext = NULL;
   int len = avformat_open_input(&formatContext, fileName.c_str(), nullptr, nullptr);
 
-  if (len != 0) 
+  if (len != 0)
   {
-    cerr << "Could not open input " << fileName << endl;;
+    cerr << "Could not open input " << fileName << endl;
+    ;
     throw -0x10;
   }
-    
-  if (avformat_find_stream_info(formatContext, NULL) < 0) 
+
+  if (avformat_find_stream_info(formatContext, NULL) < 0)
   {
-    cerr << "Could not read stream information from " <<  fileName << endl;
+    cerr << "Could not read stream information from " << fileName << endl;
     throw -0x11;
   }
   av_dump_format(formatContext, 0, fileName.c_str(), 0);
@@ -557,12 +533,12 @@ void readVideo(const std::string &fileName, int framesNum)
   auto codec = formatContext->streams[videoStreamIndex]->codecpar;
   AVCodecContext *videoDecodec;
   {
-    if(codec->codec_id == 0)
+    if (codec->codec_id == 0)
     {
       cerr << "-0x30" << endl;
       throw -0x30;
     }
-    AVCodec* c = avcodec_find_decoder(codec->codec_id);
+    AVCodec *c = avcodec_find_decoder(codec->codec_id);
     if (c == NULL)
     {
       cerr << "Could not find decoder ID " << codec->codec_id << endl;
@@ -585,10 +561,11 @@ void readVideo(const std::string &fileName, int framesNum)
   AVPacket packet;
   thumbHeight = 128;
   thumbWidth = videoDecodec->width * thumbHeight / videoDecodec->height;
-  struct SwsContext *swsContext = sws_getContext(videoDecodec->width, videoDecodec->height, videoDecodec->pix_fmt, 
-                                                 thumbWidth, thumbHeight, AV_PIX_FMT_RGB24,
-                                                 SWS_BICUBIC, NULL, NULL, NULL);
-  if (swsContext == NULL) 
+  proxyHeight = 720;
+  proxyWidth = videoDecodec->width * proxyHeight / videoDecodec->height;
+  struct SwsContext *swsContext = sws_getContext(
+    videoDecodec->width, videoDecodec->height, videoDecodec->pix_fmt, proxyWidth, proxyHeight, AV_PIX_FMT_RGB24, SWS_BICUBIC, NULL, NULL, NULL);
+  if (swsContext == NULL)
   {
     ostringstream err;
     err << "Could not create swscale context for " << videoDecodec->width << "x" << videoDecodec->height;
@@ -598,16 +575,16 @@ void readVideo(const std::string &fileName, int framesNum)
   AVFrame *rgbFrame = av_frame_alloc();
   if (!rgbFrame)
     throw runtime_error("Could not allocate memory for RGB frame");
-  rgbFrame->width = thumbWidth;
-  rgbFrame->height = thumbHeight;
+  rgbFrame->width = proxyWidth;
+  rgbFrame->height = proxyHeight;
   rgbFrame->format = AV_PIX_FMT_RGB24;
   auto numBytes = avpicture_get_size((AVPixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
-  vector<shared_ptr<Frame> > levels;
+  vector<shared_ptr<Frame>> levels;
   uint8_t *buffer = (uint8_t *)av_malloc(numBytes);
   avpicture_fill((AVPicture *)rgbFrame, buffer, (AVPixelFormat)rgbFrame->format, rgbFrame->width, rgbFrame->height);
-  thumbLinesize = rgbFrame->linesize[0];
-  bool isThumbCached = fileExists(fileName + ".thum");
-  if (!isThumbCached)
+  proxyLinesize = rgbFrame->linesize[0];
+  bool isProxyCached = fileExists(fileName + ".thum");
+  if (!isProxyCached)
   {
     std::ofstream f(fileName + ".thum");
     f.seekp(static_cast<size_t>(framesNum) * numBytes);
@@ -618,17 +595,17 @@ void readVideo(const std::string &fileName, int framesNum)
     int f = open((fileName + ".thum").c_str(), O_RDWR);
     if (f < 0)
       throw runtime_error("cannot open the file: " + fileName + ".thum");
-    thumbs = (unsigned char *)mmap(nullptr, static_cast<size_t>(framesNum) * numBytes, PROT_READ | PROT_WRITE, MAP_SHARED, f, 0);
-    if (thumbs == MAP_FAILED)
+    proxy = (unsigned char *)mmap(nullptr, static_cast<size_t>(framesNum) * numBytes, PROT_READ | PROT_WRITE, MAP_SHARED, f, 0);
+    if (proxy == MAP_FAILED)
     {
       throw runtime_error(std::string() + "mmap " + strerror(errno) + std::to_string(errno));
     }
   }
-  thumsSize = static_cast<size_t>(framesNum) * numBytes;
+  proxySize = static_cast<size_t>(framesNum) * numBytes;
   int frameNum = 0;
   while (av_read_frame(formatContext, &packet) == 0)
   {
-    if (packet.stream_index == videoStreamIndex && !isThumbCached)
+    if (packet.stream_index == videoStreamIndex && !isProxyCached)
     {
       if (packet.pts % (24 * 10) == 0)
         clog << "." << endl;
@@ -637,9 +614,8 @@ void readVideo(const std::string &fileName, int framesNum)
       avcodec_decode_video2(videoDecodec, decodedFrame, &result, &packet);
       if (result)
       {
-        sws_scale(swsContext, decodedFrame->data, decodedFrame->linesize, 0, decodedFrame->height, 
-                  rgbFrame->data, rgbFrame->linesize);
-        memcpy(thumbs + static_cast<size_t>(frameNum++) * numBytes, rgbFrame->data[0], numBytes);
+        sws_scale(swsContext, decodedFrame->data, decodedFrame->linesize, 0, decodedFrame->height, rgbFrame->data, rgbFrame->linesize);
+        memcpy(proxy + static_cast<size_t>(frameNum++) * numBytes, rgbFrame->data[0], numBytes);
       }
       av_free(decodedFrame);
     }
@@ -649,26 +625,39 @@ void readVideo(const std::string &fileName, int framesNum)
   av_free(rgbFrame);
   sws_freeContext(swsContext);
   avformat_free_context(formatContext);
-
 }
-
-
 
 int lastX = -1;
 int lastMouseX = -1;
 
-void mouse(int button, int state, int x, int /*y*/)
+int lastMouseY = -1;
+bool isZooming = false;
+
+void mouse(int button, int state, int x, int y)
 {
-  if (button == GLUT_RIGHT_BUTTON)
+  if (button == GLUT_MIDDLE_BUTTON)
   {
-    follow = false;
-    if (state == GLUT_DOWN)
+    if ((glutGetModifiers() & GLUT_ACTIVE_CTRL) == 0)
     {
-      lastX = g_x;
-      lastMouseX = x;
+      follow = false;
+      if (state == GLUT_DOWN)
+      {
+        lastX = g_x;
+        lastMouseX = x;
+      }
+      else if (state == GLUT_UP)
+        lastX = -1;
     }
-    else if (state == GLUT_UP)
-      lastX = -1;
+    else
+    {
+      if (state == GLUT_DOWN)
+      {
+        lastMouseY = y;
+        isZooming = true;
+      }
+      else if (state == GLUT_UP)
+        isZooming = false;
+    }
   }
   else if (button == GLUT_LEFT_BUTTON)
   {
@@ -734,8 +723,8 @@ void mouse(int button, int state, int x, int /*y*/)
               rs.push_back(i->end);
               rmList.erase(i);
             }
-            int speedUp = ((glutGetModifiers() & GLUT_ACTIVE_CTRL) != 0) ? 600 : 6;
-                        
+            int speedUp = ((glutGetModifiers() & GLUT_ACTIVE_CTRL) != 0) ? 6 : 600;
+
             if (!rs.empty())
             {
               auto mm = minmax_element(begin(rs), end(rs));
@@ -756,11 +745,9 @@ void mouse(int button, int state, int x, int /*y*/)
             minMaxCalc();
             auto tmp = rmList;
             rmList.clear();
-            for (auto &rm: tmp)
+            for (auto &rm : tmp)
             {
-              rmList.insert(Range(rm.start + p2 - p1,
-                                  rm.end + p2 - p1,
-                                  rm.speedUp));
+              rmList.insert(Range(rm.start + p2 - p1, rm.end + p2 - p1, rm.speedUp));
             }
           }
           else
@@ -769,11 +756,9 @@ void mouse(int button, int state, int x, int /*y*/)
             minMaxCalc();
             auto tmp = rmList;
             rmList.clear();
-            for (auto &rm: tmp)
+            for (auto &rm : tmp)
             {
-              rmList.insert(Range(rm.start - p2 + p1,
-                                  rm.end - p2 + p1,
-                                  rm.speedUp));
+              rmList.insert(Range(rm.start - p2 + p1, rm.end - p2 + p1, rm.speedUp));
             }
           }
         }
@@ -785,19 +770,26 @@ void mouse(int button, int state, int x, int /*y*/)
   if (button == 3 || button == 4)
     if (state == GLUT_DOWN)
     {
-      auto zoom0 = zoom;
+      const auto zoom0 = zoom;
       zoom *= pow(1.3, 3 * (button - 3.5f));
       g_x = x * zoom0 + g_x - x * zoom;
       glutPostRedisplay();
     }
 }
 
-void motion(int x, int /*y*/)
+void motion(int x, int y)
 {
   if (lastX != -1)
     g_x = lastX + (lastMouseX - x) * zoom;
   if (lastXX != -1)
     lastXX2 = x;
+  if (isZooming)
+  {
+    const auto zoom0 = zoom;
+    zoom *= pow(1.3, .1 * (y - lastMouseY));
+    g_x = x * zoom0 + g_x - x * zoom;
+    lastMouseY = y;
+  }
   glutPostRedisplay();
 }
 
@@ -805,34 +797,37 @@ volatile bool done = false;
 
 void playerThread()
 {
-  static const pa_sample_spec ss = 
-    {
-      PA_SAMPLE_S16LE, /**< The sample format */
-      sampleRate, /**< The sample rate. (e.g. 44100) */
-      1u /**< Audio channels. (1 for mono, 2 for stereo, ...) */
-    };
+  static const pa_sample_spec ss = {
+    PA_SAMPLE_S16LE, /**< The sample format */
+    sampleRate,      /**< The sample rate. (e.g. 44100) */
+    1u               /**< Audio channels. (1 for mono, 2 for stereo, ...) */
+  };
   int error;
   pa_simple *paSimple = pa_simple_new(NULL, "video_edit", PA_STREAM_PLAYBACK, NULL, "playback", &ss, NULL, NULL, &error);
   if (!paSimple)
   {
-    cerr << __FILE__": pa_simple_new() failed: " << pa_strerror(error) << endl;
+    cerr << __FILE__ ": pa_simple_new() failed: " << pa_strerror(error) << endl;
     return;
   }
   while (!done)
   {
     if (state == Playing)
     {
-      if ((latency = pa_simple_get_latency(paSimple, &error)) == (pa_usec_t) -1) 
+      if ((latency = pa_simple_get_latency(paSimple, &error)) == (pa_usec_t)-1)
       {
-        cerr <<  __FILE__": pa_simple_get_latency() failed: " << pa_strerror(error) << endl;
+        cerr << __FILE__ ": pa_simple_get_latency() failed: " << pa_strerror(error) << endl;
         pa_simple_free(paSimple);
         return;
       }
 
+      const auto p = pos;
+      if (p >= static_cast<int>(audio.size()) - 1024)
+        continue;
+
       /* ... and play it */
-      if (pa_simple_write(paSimple, &audio[pos], 1024, &error) < 0) 
+      if (pa_simple_write(paSimple, &audio[p], 1024, &error) < 0)
       {
-        cerr << __FILE__": pa_simple_write() failed: " << pa_strerror(error) << endl;
+        cerr << __FILE__ ": pa_simple_write() failed: " << pa_strerror(error) << endl;
         pa_simple_free(paSimple);
         return;
       }
@@ -865,7 +860,8 @@ void saveAudio()
     vector<int16_t> buff;
     auto v = audio[currentSample];
     size_t frameSize;
-    frameSize = 1024;;
+    frameSize = 1024;
+    ;
     while (buff.size() < frameSize || ((v >= 0 || audio[currentSample] <= 0) && (abs(v) >= 10 || abs(audio[currentSample]) >= 10)))
     {
       v = audio[currentSample];
@@ -878,9 +874,8 @@ void saveAudio()
     {
       speedUp = removeRange->speedUp;
       skip += 1LL * (removeRange->end - removeRange->start) * (speedUp - 1) / speedUp;
-      cout << currentSample << "\t" << 1.0 * currentSample / sampleRate << "\tskip + " 
-           << 1.0 * 1LL * (removeRange->end - removeRange->start) * (speedUp - 1) / speedUp / sampleRate<< " =\t" 
-           << 1.0 * skip / sampleRate << "\t" 
+      cout << currentSample << "\t" << 1.0 * currentSample / sampleRate << "\tskip + "
+           << 1.0 * 1LL * (removeRange->end - removeRange->start) * (speedUp - 1) / speedUp / sampleRate << " =\t" << 1.0 * skip / sampleRate << "\t"
            << speedUp << endl;
       ++removeRange;
     }
@@ -890,10 +885,10 @@ void saveAudio()
       skip -= buff.size();
       if (sum.size() < buff.size())
         sum.resize(buff.size());
-            
+
       for (size_t i = 0; i < std::min(sum.size(), buff.size()); ++i)
         sum[i] += buff[i];
-                
+
       ++skipCount;
     }
     else
@@ -929,21 +924,25 @@ void saveAudio()
 thread *t;
 thread *readVideoThread;
 
+void saveRmList()
+{
+  ofstream f(fileName + "_rm.txt");
+  for (auto i : rmList)
+    f << i.start << " " << i.end << " " << i.speedUp << endl;
+}
+
 void bye()
 {
   clog << "bye" << endl;
   done = true;
   t->join();
-  ofstream f(fileName + "_rm.txt");
-  for (auto i: rmList)
-    f << i.start << " " << i.end << " " << i.speedUp << endl;
+  saveRmList();
   saveAudio();
   fftw_destroy_plan(plan);
   fftw_free(fftIn);
   fftw_free(fftOut);
   delete t;
 }
-
 
 void timer(int = 0)
 {
@@ -985,11 +984,9 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
     minMaxCalc();
     auto tmp = rmList;
     rmList.clear();
-    for (auto &rm: tmp)
+    for (auto &rm : tmp)
     {
-      rmList.insert(Range(rm.start + sampleRate / Fps,
-                          rm.end + sampleRate / Fps,
-                          rm.speedUp));
+      rmList.insert(Range(rm.start + sampleRate / Fps, rm.end + sampleRate / Fps, rm.speedUp));
     }
     glutPostRedisplay();
   }
@@ -1000,15 +997,17 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
     minMaxCalc();
     auto tmp = rmList;
     rmList.clear();
-    for (auto &rm: tmp)
+    for (auto &rm : tmp)
     {
-      rmList.insert(Range(rm.start - sampleRate / Fps,
-                          rm.end - sampleRate / Fps,
-                          rm.speedUp));
+      rmList.insert(Range(rm.start - sampleRate / Fps, rm.end - sampleRate / Fps, rm.speedUp));
     }
     glutPostRedisplay();
   }
-
+  else if (key == 's')
+  {
+    std::clog << "save\n";
+    saveRmList();
+  }
 }
 
 void special(int key, int /*x*/, int /*y*/)
@@ -1020,7 +1019,7 @@ void special(int key, int /*x*/, int /*y*/)
     const auto Offset = sampleRate / Fps;
     if (key == GLUT_KEY_LEFT)
     {
-      p = (p - Offset - l * sampleRate / 1000000) / Offset * Offset +  l * sampleRate / 1000000;
+      p = (p - Offset - l * sampleRate / 1000000) / Offset * Offset + l * sampleRate / 1000000;
       if (p < 0)
         p = 0;
       pos = p;
@@ -1052,7 +1051,7 @@ int main(int argc, char **argv)
   fftIn = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
   fftOut = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
   plan = fftw_plan_dft_1d(SpecSize, fftIn, fftOut, FFTW_FORWARD, FFTW_MEASURE);
-    
+
   auto framesNum = readAudio(fileName);
   readVideoThread = new thread(readVideo, fileName, framesNum);
   if (!fileExists(fileName + "_rm.txt"))
@@ -1073,8 +1072,8 @@ int main(int argc, char **argv)
         rmList.insert(Range(b, e, s));
     }
   }
-  width = 1280;
-  height = 720;
+  width = 1920;
+  height = 1080;
   glutInit(&argc, argv);
   glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
   glutInitWindowSize(width, height);
@@ -1101,4 +1100,3 @@ int main(int argc, char **argv)
   atexit(bye);
   glutMainLoop();
 }
-

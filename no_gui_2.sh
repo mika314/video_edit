@@ -1,6 +1,6 @@
 #!/bin/bash
 
-FPS=30
+FPS=60
 #SampleRate=48000
 SampleRate=44100
 
@@ -8,7 +8,7 @@ rootdir=`dirname $0`
 echo Detect silence in the video
 $rootdir/silence_detector/silence_detector $1
 echo Remove frames from the video
-ffmpeg -i $1 -f yuv4mpegpipe -r $FPS - | $rootdir/frame_remover/frame_remover $1_rm.txt $SampleRate | ffmpeg -f yuv4mpegpipe -i - -b 20000k -threads 8 `basename $1 .mp4`_noaudio.mp4
+ffmpeg -i $1 -f yuv4mpegpipe -r $FPS - | $rootdir/frame_remover/frame_remover $1_rm.txt $SampleRate | ffmpeg -f yuv4mpegpipe -i - -b 20000k -threads 16 `basename $1 .mp4`_noaudio.mp4
 mv $1.s16l $1.raw
 echo Mix video and audio
 ffmpeg -i `basename $1 .mp4`_noaudio.mp4 -f s16le -ac 1 -ar $SampleRate -i $1.raw -map 0:0 -map 1:0 -vcodec copy -ab 128k -strict experimental -acodec aac `basename $1 .mp4`_mix.mp4
