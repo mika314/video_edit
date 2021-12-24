@@ -561,7 +561,7 @@ void readVideo(const std::string &fileName, int framesNum)
   AVPacket packet;
   thumbHeight = 128;
   thumbWidth = videoDecodec->width * thumbHeight / videoDecodec->height;
-  proxyHeight = 720;
+  proxyHeight = 360;
   proxyWidth = videoDecodec->width * proxyHeight / videoDecodec->height;
   struct SwsContext *swsContext = sws_getContext(
     videoDecodec->width, videoDecodec->height, videoDecodec->pix_fmt, proxyWidth, proxyHeight, AV_PIX_FMT_RGB24, SWS_BICUBIC, NULL, NULL, NULL);
@@ -665,7 +665,7 @@ void mouse(int button, int state, int x, int y)
       lastXX = x;
     if (state == GLUT_UP)
     {
-      if (abs(lastXX - x) < 3)
+      if (abs(lastXX - x) < 6)
       {
         auto p = x * zoom + g_x;
         if (p < 0)

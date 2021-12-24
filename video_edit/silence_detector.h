@@ -5,7 +5,7 @@
 
 struct Range
 {
-  Range(int aStart, int aEnd, int aSpeedUp = 6) : start(aStart), end(aEnd), speedUp(aSpeedUp) {}
+  Range(int aStart, int aEnd, int aSpeedUp = 600) : start(aStart), end(aEnd), speedUp(aSpeedUp) {}
   int start;
   int end;
   int speedUp;
