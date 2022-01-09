@@ -42,8 +42,8 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
       *f[1] = 0;
     }
     fftw_execute(plan);
-    double ave = 0;
-    double sq = 0;
+    double aveSum = 0;
+    double sqSum = 0;
     int c = 0;
     for (auto f = fftOut + static_cast<int>(CutFreq * SpecSize / 44100.0f); f < fftOut + SpecSize / 2; ++f)
     {
@@ -52,11 +52,17 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
       ++c;
       if (c < SpecSize / 4 && c > 7)
       {
-        sq += tmp;
-        ave += m;
+        sqSum += tmp;
+        aveSum += m;
       }
     }
-    if (sq / ave < 90000 || ave / (SpecSize / 4 - 7) < 0.001 * 0.1 * (32000 * SpecSize))
+
+    const auto sq = sqSum / aveSum;
+    const auto ave = aveSum / (SpecSize / 4 - 7);
+    const auto aveMinThreshold = 0.00002 * (32000 * SpecSize);
+    const auto aveMaxThreshold = 0.00005 * (32000 * SpecSize);
+
+    if ((sq < 20000 && ave < aveMaxThreshold) || ave < aveMinThreshold)
     {
       ++silenceCount;
       if (silenceCount > 6)
@@ -68,7 +74,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
     }
     else
     {
-      cout << "voice " << ave / (SpecSize / 4 - 7) << " " << 0.08 * 0.1 * (32000 * SpecSize) << endl;
+      cout << "voice " << ave << " " << aveMinThreshold << endl;
       if (state == Silence)
         if (static_cast<int>(p) - SpecSize > start)
         {

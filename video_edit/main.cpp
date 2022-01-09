@@ -115,8 +115,8 @@ void drawSpec()
   }
   fftw_execute(plan);
   vector<double> s;
-  double ave = 0;
-  double sq = 0;
+  double aveSum = 0;
+  double sqSum = 0;
   for (auto f = fftOut; f < fftOut + SpecSize / 2; ++f)
   {
     double tmp = *f[0] * *f[0] + *f[1] * *f[1];
@@ -124,8 +124,8 @@ void drawSpec()
     s.push_back(m);
     if (s.size() < SpecSize / 4 && s.size() > 7)
     {
-      sq += tmp;
-      ave += m;
+      sqSum += tmp;
+      aveSum += m;
     }
   }
   const double Max = 0.1 * (32000 * SpecSize);
@@ -144,7 +144,11 @@ void drawSpec()
   glEnd();
   glLoadIdentity();
   glOrtho(0, width, -dmax * thumbHeight / (height - thumbHeight - proxyHeight), dmax * proxyHeight / (height - thumbHeight - proxyHeight), -1, 1);
-  if (sq / ave / 2000000.0 < 0.03 || ave / (SpecSize / 4 - 7) < 0.001 * Max)
+  const auto sq = sqSum / aveSum;
+  const auto ave = aveSum / (SpecSize / 4 - 7);
+  const auto aveMinThreshold = 0.0001 * (32000 * SpecSize);
+  const auto aveMaxThreshold = 0.0002 * (32000 * SpecSize);
+  if ((sq < 20000 && ave > aveMaxThreshold) || ave < aveMinThreshold)
     glColor3f(0.5, 0.5, 0.0);
   else
     glColor3f(0.7, 0.0, 0.0);
@@ -332,7 +336,6 @@ int readAudio(string fileName)
 {
   int framesNum = 0;
   cout << "Reading video: " << fileName << endl;
-  av_register_all();
   AVFormatContext *formatContext = NULL;
   int len = avformat_open_input(&formatContext, fileName.c_str(), nullptr, nullptr);
   if (len != 0)
@@ -883,11 +886,29 @@ void saveAudio()
     if (skip > 0 && skipCount < speedUp)
     {
       skip -= buff.size();
-      if (sum.size() < buff.size())
-        sum.resize(buff.size());
 
-      for (size_t i = 0; i < std::min(sum.size(), buff.size()); ++i)
-        sum[i] += buff[i];
+      const auto sumVol = [&]() {
+        auto ret = 0;
+        for (const auto v : sum)
+          if (std::abs(v) > ret)
+            ret = v;
+        return ret;
+      }();
+      const auto buffVol = [&]() {
+        auto ret = 0;
+        for (const auto v : buff)
+          if (std::abs(v) > ret)
+            ret = v;
+        return ret;
+      }();
+
+      if (buffVol < sumVol)
+      {
+        if (sum.size() < buff.size())
+          sum.resize(buff.size());
+        for (size_t i = 0; i < std::min(sum.size(), buff.size()); ++i)
+          sum[i] = buff[i];
+      }
 
       ++skipCount;
     }
