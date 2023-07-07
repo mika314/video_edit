@@ -1,87 +1,116 @@
 #include "silence_detector.h"
-#include <fftw3.h>
-#include <deque>
-#include <cmath>
-#include <algorithm>
 #include <iostream>
-#include <cstring>
+#include <pocketsphinx.h>
+#include <sstream>
 using namespace std;
 
-std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &audio)
+std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &wav)
 {
-    std::set<Range, Cmp> result;
-    const int SpecSize = 2048;
-    const auto CutFreq = 200.0f;
+  std::set<Range, Cmp> result;
 
-    fftw_complex *fftIn;
-    fftw_complex *fftOut;
-    fftw_plan plan;
-    fftIn = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
-    fftOut = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * SpecSize);
-    memset(fftIn, 0, sizeof(fftw_complex) * SpecSize);
-    memset(fftOut, 0, sizeof(fftw_complex) * SpecSize);
-    plan = fftw_plan_dft_1d(SpecSize, fftIn, fftOut, FFTW_FORWARD, FFTW_MEASURE);
-    
-    enum State { Voice, Silence } state = Silence;
-    int silenceCount = 0;
-    int start = 0;
+  const auto config = []() {
+    auto ret = ps_config_init(nullptr);
+    ps_default_search_args(ret);
+    ps_config_set_str(ret, "lm", nullptr);
+    ps_config_set_str(
+      ret,
+      "allphone",
+      "/home/mika/prj/video_edit/silence_detector/pocketsphinx-model/en-us/en-us-phone.lm.bin");
+    ps_config_set_str(
+      ret, "hmm", "/home/mika/prj/video_edit/silence_detector/pocketsphinx-model/en-us/en-us");
+    ps_config_set_bool(ret, "backtrace", TRUE);
+    ps_config_set_float(ret, "beam", 1e-20);
+    ps_config_set_float(ret, "lw", 2.0);
 
-    int percent = -1;
+    return ret;
+  }();
+  const auto decoder = [&config]() {
+    auto ret = ps_init(config);
+    if (!ret)
+      throw std::runtime_error("PocketSphinx decoder init failed");
+    return ret;
+  }();
+  const auto ep = []() {
+    auto ret = ps_endpointer_init(0.f, 0.45f, PS_VAD_LOOSE, 0, 0);
+    if (!ret)
+      throw std::runtime_error("PocketSphinx endpointer init failed");
+    return ret;
+  }();
 
-    for (size_t p = 0; p < audio.size() - SpecSize; p += SpecSize)
+  enum State { Voice, Silence } state = Silence;
+  int start = 0;
+
+  const auto fs = static_cast<int>(ps_endpointer_frame_size(ep));
+  std::vector<int16_t> buf;
+  for (size_t p = 0; p < wav.size() - fs; p += fs)
+  {
+    for (auto i = begin(wav) + p; i < begin(wav) + p + fs; ++i)
+      buf.push_back(*i);
+    const auto prevInSpeech = ps_endpointer_in_speech(ep);
+    auto speech = ps_endpointer_process(ep, buf.data());
+    buf.clear();
+    if (!speech)
     {
-        if (percent != static_cast<int>(p * 100 / audio.size()))
-        {
-            percent = p * 100 / audio.size();
-            cout << percent << endl;
-        }
-        auto f = fftIn;
-        for (auto i = begin(audio) + p; i < begin(audio) + p + SpecSize; ++i, ++f)
-        {
-            *f[0] = *i;
-            *f[1] = 0;
-        }
-        fftw_execute(plan);
-        double ave = 0;
-        double sq = 0;
-        int c = 0;
-        for (auto f = fftOut + static_cast<int>(CutFreq * SpecSize / 44100.0f); f < fftOut + SpecSize / 2; ++f)
-        {
-            double tmp = *f[0] * *f[0] + *f[1] * *f[1];
-            double m = sqrt(tmp);
-            ++c;
-            if (c < SpecSize / 4 && c > 7)
-            {
-                sq += tmp;
-                ave += m;
-            }
-        }
-        if (sq / ave < 90000 || ave / (SpecSize / 4 - 7) < 0.001 * 0.1 * (32000 * SpecSize))
-        {
-            ++silenceCount;
-            if (silenceCount > 6)
-            {
-                if (state == Voice)
-                    start = p;
-                state = Silence;
-            }
-        }
-        else
-        {
-            cout << "voice " << ave / (SpecSize / 4 - 7) << " " << 0.08 * 0.1 * (32000 * SpecSize) << endl;
-            if (state == Silence)
-                if (static_cast<int>(p) - SpecSize > start)
-                {
-                    cout << start << " " << p - SpecSize << endl;
-                    result.insert(Range(start, p - SpecSize));
-                }
-            state = Voice;
-            silenceCount = 0;
-        }
+      if (state == Voice)
+        start = p;
+      state = Silence;
+      continue;
     }
+    if (!prevInSpeech)
+      ps_start_utt(decoder);
+    const auto ret = ps_process_raw(decoder, speech, fs, FALSE, FALSE);
+    if (ret < 0)
+      throw std::runtime_error("ps_process_raw() failed");
+    const auto hyp = ps_get_hyp(decoder, nullptr);
+    if (hyp)
+    {
+      std::istringstream st(hyp);
+      std::string tmp;
+      std::string phoneme = "SIL";
+      while (std::getline(st, tmp, ' '))
+      {
+        if (tmp[0] != '+')
+          phoneme = tmp;
+      }
+      if (phoneme == "SIL")
+      {
+        if (state == Voice)
+          start = p;
+        state = Silence;
+      }
+      else
+      {
+        const auto padding = 8 * fs;
+        if (state == Silence)
+          if (static_cast<int>(p) - padding > start)
+          {
+            auto dur = (p - padding - start) / 44100.f;
+            if (dur > 0.2f)
+            {
+              const auto speedup = std::min(30, std::max(static_cast<int>(dur * 15), 2));
+              cout << p * 100 / wav.size() << "% " << start << " - " << p - padding << " " << dur << " x"
+                   << speedup << endl;
+              result.insert(Range(start, p - padding, speedup));
+            }
+          }
+        state = Voice;
+      }
+    }
+    else
+    {
+      if (state == Voice)
+        start = p;
+      state = Silence;
+    }
+    if (!ps_endpointer_in_speech(ep))
+    {
+      ps_end_utt(decoder);
+      ps_get_hyp(decoder, nullptr);
+    }
+  }
 
-    fftw_destroy_plan(plan);
-    fftw_free(fftIn);
-    fftw_free(fftOut);
-    return result;
+  ps_endpointer_free(ep);
+  ps_free(decoder);
+  ps_config_free(config);
+  return result;
 }

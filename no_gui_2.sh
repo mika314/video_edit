@@ -1,8 +1,8 @@
 #!/bin/bash
 
 FPS=30
-SampleRate=48000
-#SampleRate=44100
+#SampleRate=48000
+SampleRate=44100
 
 rootdir=`dirname $0`
 echo Detect silence in the video

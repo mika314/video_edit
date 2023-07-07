@@ -1,7 +1,7 @@
 #!/bin/bash
 
 FPS=30
-SampleRate=48000
+SampleRate=44100
 rootdir=`dirname $0`/..
 
 echo Remove frames from the video
