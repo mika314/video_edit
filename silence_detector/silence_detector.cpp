@@ -87,7 +87,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &wav)
             auto dur = (p - padding - start) / 44100.f;
             if (dur > 0.2f)
             {
-              const auto speedup = std::min(30, std::max(static_cast<int>(dur * 15), 2));
+              const auto speedup = std::min(15, std::max(static_cast<int>(dur * 15), 2));
               cout << p * 100 / wav.size() << "% " << start << " - " << p - padding << " " << dur << " x"
                    << speedup << endl;
               result.insert(Range(start, p - padding, speedup));

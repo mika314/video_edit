@@ -1,3 +1,4 @@
+#include "extract_silence_from_captions.h"
 #include "silence_detector.h"
 #ifndef INT64_C
 #define INT64_C(c) (c##LL)
@@ -13,9 +14,11 @@ extern "C" {
 #include <cassert>
 #include <fcntl.h>
 #include <fftw3.h>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <log/log.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <sys/mman.h>
@@ -272,13 +275,15 @@ void saveAudio()
   vector<int16_t> result;
   vector<int> sum;
   int speedUp = 6;
+  int endSample = 0;
+  int inputCnt = 0;
+  int outCnt = 0;
   while (inputSample < static_cast<ssize_t>(audio.size()))
   {
     vector<int16_t> buff;
     auto v = audio[inputSample];
     const size_t frameSize = 1024;
-    while (buff.size() < frameSize ||
-           ((v >= 0 || audio[inputSample] <= 0) && (abs(v) >= 10 || abs(audio[inputSample]) >= 10)))
+    while (buff.size() < frameSize || v > 0 || audio[inputSample] < 0)
     {
       v = audio[inputSample];
       buff.push_back(v);
@@ -290,45 +295,46 @@ void saveAudio()
     if (removeRange != end(rmList) && inputSample > removeRange->start)
     {
       speedUp = removeRange->speedUp;
+      endSample = removeRange->end;
       outputSample -=
         removeRange->end - removeRange->start - (removeRange->end - removeRange->start) / speedUp;
       cout << inputSample << "\t" << inputSample << "\tskip + "
            << (removeRange->end - removeRange->start) * (speedUp - 1) / speedUp << " =\t" << speedUp
            << endl;
+      inputCnt = 0;
+      outCnt = 0;
       ++removeRange;
     }
-    if (static_cast<ssize_t>(result.size()) > outputSample && skipCount < speedUp)
+
+    if (static_cast<ssize_t>(result.size()) > outputSample &&
+        (sum.empty() || inputCnt < speedUp * outCnt))
     {
-      if (sum.size() < buff.size())
-        sum.resize(buff.size());
+      while (sum.size() < buff.size())
+        sum.push_back(0);
 
       for (size_t i = 0; i < std::min(sum.size(), buff.size()); ++i)
         sum[i] += buff[i];
 
       ++skipCount;
+      inputCnt += buff.size();
     }
     else
     {
-      cout << "." << endl;
-      if (sum.size() < buff.size())
-        sum.resize(buff.size());
+      while (sum.size() < buff.size())
+        sum.push_back(0);
       ++skipCount;
-      if (skipCount < 10)
+      for (size_t i = 0; i < sum.size(); ++i)
       {
-        for (size_t i = 0; i < sum.size(); ++i)
-        {
-          int r = (sum[i] + (i < buff.size() ? buff[i] : 0)) * 2 / (skipCount + 1);
-          if (r > 0x7800)
-            r = 0x7800;
-          if (r < -0x7800)
-            r = -0x7800;
-          result.push_back(r);
-        }
+        int r = (sum[i] + (i < buff.size() ? buff[i] : 0)) / skipCount;
+        if (r > 0x7800)
+          r = 0x7800;
+        if (r < -0x7800)
+          r = -0x7800;
+        result.push_back(r);
+        ++outCnt;
       }
-      else
-        for (size_t i = 0; i < buff.size(); ++i)
-          result.push_back(buff[i]);
       skipCount = 0;
+      inputCnt += buff.size();
       sum.resize(0);
     }
   }
@@ -364,6 +370,18 @@ int main(int argc, char **argv)
   while (sum < audio.size() / 10000)
     sum += hist[max--];
   std::cout << "Average: " << 1.0f * max / 0x7fff << std::endl;
-  rmList = silenceDetector(audio);
+  std::filesystem::path filePath(fileName);
+  filePath.replace_extension(".txt");
+  std::string txtFileName = filePath.string();
+  if (std::filesystem::exists(txtFileName))
+  {
+    LOG("using sbv file");
+    rmList = extractSilencesFromCaptions(txtFileName);
+  }
+  else
+  {
+    LOG("using audio");
+    rmList = silenceDetector(audio);
+  }
   bye();
 }
