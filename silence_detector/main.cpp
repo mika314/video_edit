@@ -223,7 +223,7 @@ void readVideoFile(string fileName)
               int sum = 0;
               for (int c = 0; c < channels; ++c)
                 sum += ((float *)decodedFrame->data[0])[i * channels + c] * 0x8000;
-              audio.push_back(sum / channels);
+              audio.push_back(std::clamp(sum / channels, -0x7800, 0x7800));
             }
           }
           else if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_FLTP)
@@ -233,7 +233,7 @@ void readVideoFile(string fileName)
               int sum = 0;
               for (int c = 0; c < channels; ++c)
                 sum += ((float *)decodedFrame->data[c])[i] * 0x8000;
-              audio.push_back(sum / channels);
+              audio.push_back(std::clamp(sum / channels, -0x7800, 0x7800));
             }
           }
           else if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_S16)
@@ -243,7 +243,7 @@ void readVideoFile(string fileName)
               int sum = 0;
               for (int c = 0; c < channels; ++c)
                 sum += ((int16_t *)decodedFrame->data[0])[i * channels + c];
-              audio.push_back(sum / channels);
+              audio.push_back(std::clamp(sum / channels, -0x7800, 0x7800));
             }
           }
           else if (audioDecodec->sample_fmt == AV_SAMPLE_FMT_S16P)
@@ -253,7 +253,7 @@ void readVideoFile(string fileName)
               int sum = 0;
               for (int c = 0; c < channels; ++c)
                 sum += ((int16_t *)decodedFrame->data[0])[i + c * dataSize / sizeof(int16_t) / channels];
-              audio.push_back(sum / channels);
+              audio.push_back(std::clamp(sum / channels, -0x7800, 0x7800));
             }
           }
         }
@@ -275,7 +275,6 @@ void saveAudio()
   vector<int16_t> result;
   vector<int> sum;
   int speedUp = 6;
-  int endSample = 0;
   int inputCnt = 0;
   int outCnt = 0;
   while (inputSample < static_cast<ssize_t>(audio.size()))
@@ -295,7 +294,6 @@ void saveAudio()
     if (removeRange != end(rmList) && inputSample > removeRange->start)
     {
       speedUp = removeRange->speedUp;
-      endSample = removeRange->end;
       outputSample -=
         removeRange->end - removeRange->start - (removeRange->end - removeRange->start) / speedUp;
       cout << inputSample << "\t" << inputSample << "\tskip + "
@@ -351,6 +349,37 @@ void bye()
   saveAudio();
 }
 
+// Merge two sets of ranges
+std::set<Range, Cmp> mergeRanges(const std::set<Range, Cmp> &set1, const std::set<Range, Cmp> &set2)
+{
+  // Combine the two sets into a vector and sort it
+  std::vector<Range> ranges(set1.begin(), set1.end());
+  ranges.insert(ranges.end(), set2.begin(), set2.end());
+  std::sort(
+    ranges.begin(), ranges.end(), [](const Range &a, const Range &b) { return a.start < b.start; });
+
+  // Merge overlapping ranges
+  std::set<Range, Cmp> merged;
+  for (const auto &range : ranges)
+  {
+    if (!merged.empty() && merged.rbegin()->end >= range.start)
+    {
+      // Overlapping ranges. Merge them.
+      Range &lastRange = const_cast<Range &>(*merged.rbegin()); // Get the last range
+      lastRange.end = std::max(lastRange.end, range.end);
+      const float silenceDuration = (lastRange.end - lastRange.start) / 1000.f; // convert to seconds
+      lastRange.speedUp = static_cast<int>(std::min(std::max(silenceDuration * 10, 2.f), 6.f));
+    }
+    else
+    {
+      // Non-overlapping range. Add it to the result.
+      merged.insert(range);
+    }
+  }
+
+  return merged;
+}
+
 int main(int argc, char **argv)
 {
   if (argc != 2)
@@ -376,7 +405,7 @@ int main(int argc, char **argv)
   if (std::filesystem::exists(txtFileName))
   {
     LOG("using sbv file");
-    rmList = extractSilencesFromCaptions(txtFileName);
+    rmList = mergeRanges(extractSilencesFromCaptions(txtFileName), silenceDetector(audio));
   }
   else
   {

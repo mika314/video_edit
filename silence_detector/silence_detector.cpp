@@ -80,7 +80,7 @@ std::set<Range, Cmp> silenceDetector(const std::vector<int16_t> &wav)
       }
       else
       {
-        const auto padding = 8 * fs;
+        const auto padding = 44'100;
         if (state == Silence)
           if (static_cast<int>(p) - padding > start)
           {
