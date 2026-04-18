@@ -1,8 +1,10 @@
 #!/bin/bash
 
-FPS=30
-SampleRate=48000
-#SampleRate=44100
+FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=noprint_wrappers=1:nokey=1 "$1" | awk -F'/' '{if($2 != "") print int($1/$2 + 0.5); else print $1}')
+SampleRate=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=noprint_wrappers=1:nokey=1 "$1")
+
+echo FPS $FPS
+echo SampleRate $SampleRate
 
 rootdir=`dirname $0`
 echo Detect silence in the video
